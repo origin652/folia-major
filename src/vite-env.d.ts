@@ -408,6 +408,7 @@ declare global {
     | 'checking'
     | 'available'
     | 'latest'
+    | 'unpublished'
     | 'error'
     | 'downloading'
     | 'downloaded'

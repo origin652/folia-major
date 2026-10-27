@@ -136,6 +136,8 @@ exports[`command palette registry contract > keeps the registered command order 
   "local-library-auto-scan-toggle",
   "settings-desktop",
   "settings-update-channel",
+  "updates-check",
+  "updates-download",
   "desktop-toggle-voice-input-pause",
   "desktop-toggle-prevent-display-sleep",
   "desktop-toggle-background-throttling",

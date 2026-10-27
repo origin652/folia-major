@@ -104,9 +104,9 @@ export const FoundUpdateRow: React.FC<FoundUpdateRowProps> = ({ sub }) => {
                         {t('options.downloadingProgress', { percent: Math.round(percent) })}
                     </Progress>
                 )}
-                {autoUpdateSupported && !electronSettings.ENABLE_AUTO_UPDATE && !isDownloading && !isDownloaded && (
+                {autoUpdateSupported && !isDownloading && !isDownloaded && (
                     <Button variant="primary" onClick={() => void update.onDownloadUpdate()} disabled={!update.canDownloadUpdate}>
-                        {t('options.downloadUpdate')}
+                        {t('options.updateNow')}
                     </Button>
                 )}
                 {autoUpdateSupported && isDownloaded && (

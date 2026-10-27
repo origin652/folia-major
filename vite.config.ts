@@ -188,8 +188,8 @@ export default async function viteConfig(_config: ConfigEnv): Promise<UserConfig
   // 开发服务器可以用 FOLIA_DEV_BUILD_KIND 钉住（Playwright 用）；vite build 不认这个变量。
   const buildKind = resolveDevBuildKindOverride(_config.command, process.env) ?? resolveBuildKind(process.env);
 
-  const appVersionLabel = process.env.APP_VERSION_LABEL?.trim() || 'Realeco';
-  const appReleaseChannel = process.env.APP_RELEASE_CHANNEL?.trim().toLowerCase() || 'realeco';
+  const appVersionLabel = process.env.APP_VERSION_LABEL?.trim() || 'Personal';
+  const appReleaseChannel = process.env.APP_RELEASE_CHANNEL?.trim().toLowerCase() || 'personal';
   const dockerStackVersion = process.env.DOCKER_STACK_VERSION?.trim() || '';
 
   // The /__folia_cover/ route (public/folia-cover-sw.js) runs inside the PWA worker instead of as a

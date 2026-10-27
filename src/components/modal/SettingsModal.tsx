@@ -22,7 +22,7 @@ import { kitMotionTokens, useKitReducedMotion } from './settings/kit/motion';
 import { parseNumberText } from './settings/kit/numberText';
 import { SETTINGS_PAGES, SETTINGS_PAGE_OPTIONS } from './settings/pages';
 import HelpPage from './settings/pages/HelpPage';
-import { SettingsPageContext, type CacheCategory, type SettingsPageContextValue } from './settings/pages/settingsPageContext';
+import { SettingsPageContext, type CacheCategory, type ElectronSettingsState, type SettingsPageContextValue } from './settings/pages/settingsPageContext';
 import { AiHelpPromptModal } from './AiHelpPromptModal';
 import ReleaseNotesDialog from './ReleaseNotesDialog';
 import meowImageUrl from '../../../build/miao.png';
@@ -112,13 +112,7 @@ interface SettingsModalProps {
 
 const QUARK_DOWNLOAD_URL = 'https://pan.quark.cn/s/6e4c6fa3bc6f';
 const BAIDU_DOWNLOAD_URL = 'https://pan.baidu.com/s/1f0x3g-8PMcNCO-TJ5z1rPw?pwd=flia';
-const DEFAULT_UPDATE_CHANNEL: 'realeco' | 'limo' | 'cielo' | 'internal' = __APP_RELEASE_CHANNEL__ === 'limo'
-    ? 'limo'
-    : __APP_RELEASE_CHANNEL__ === 'cielo'
-        ? 'cielo'
-        : __APP_RELEASE_CHANNEL__ === 'internal'
-            ? 'internal'
-            : 'realeco';
+const DEFAULT_UPDATE_CHANNEL = 'personal' as const;
 
 // Synchronous on purpose: the first render has to know which sections exist before the isElectron state below settles.
 const hasElectronBridge = () => typeof window !== 'undefined' && Boolean((window as any).electron);
@@ -385,7 +379,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     // Electron Settings State
     // Seeded synchronously so a remembered desktop/mods section has its title on the first frame; the effect below still confirms it.
     const [isElectron, setIsElectron] = useState(hasElectronBridge);
-    const [electronSettings, setElectronSettings] = useState({
+    const [electronSettings, setElectronSettings] = useState<ElectronSettingsState>({
         GEMINI_API_KEY: '',
         // Blank: the default model, worked out when the request is made (nothing is written back).
         GEMINI_API_MODEL: '',
@@ -648,7 +642,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         }
     };
 
-    const handleUpdateChannelChange = async (channel: 'realeco' | 'limo' | 'cielo') => {
+    const handleUpdateChannelChange = async (channel: 'realeco' | 'limo' | 'cielo' | 'personal') => {
         if (!window.electron?.saveSettings) {
             return;
         }
@@ -957,13 +951,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         closeSubview();
     };
     const updateBadgeLabel = (() => {
-        if (!electronSettings.ENABLE_UPDATE_CHECK || updateStatus?.status === 'disabled') {
+        if (updateStatus?.status === 'disabled') {
             return t('options.updateCheckDisabled') || 'Disabled';
         }
 
         if (updateStatus?.status === 'checking') {
             return t('options.updateChecking') || 'Checking...';
         }
+
+        if (updateStatus?.status === 'unpublished') return t('options.personalUpdateUnpublished');
+        if (updateStatus?.status === 'idle' || !updateStatus) return t('options.checkForUpdates');
 
         if (updateStatus?.availableVersion) {
             return `${t('options.updateAvailable') || 'Found'} v${updateStatus.availableVersion}`;
@@ -984,11 +981,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         return t('options.updateLatest') || 'Up to date';
     })();
     const canDownloadUpdate = Boolean(
-        electronSettings.ENABLE_UPDATE_CHECK &&
         updateStatus?.autoUpdateSupported &&
         updateStatus?.availableVersion &&
-        updateStatus.status !== 'downloading' &&
-        updateStatus.status !== 'downloaded'
+        updateStatus.status === 'available'
     );
     const canEnableAutoUpdate = Boolean(electronSettings.ENABLE_UPDATE_CHECK && updateStatus?.autoUpdateSupported);
 

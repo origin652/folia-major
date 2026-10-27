@@ -6,7 +6,7 @@
 
 主线信号链路面板只适用于 Web Audio / 内置 mpv，使用模组时隐藏该入口，不把外部播放器误标成 Web Audio 或已确认直通。模组输出的设备 / 格式以模组遥测和播放器自身显示为准；HQPlayer 的真实 SDM 输出仍需单独验证。
 
-日常同步在这个长期分支上合并 `origin/main`（本地远程 `origin` 是上游，`fork` 是个人 GitHub 仓库），不强推或反复改写已发布历史。宿主适配与两个模组分别提交；合并前保留快照。重点回归引擎互斥、旧会话事件隔离、静音、暂停 / seek、连续结束换曲和歌词时钟；模拟测试不证明真实 DAC 的独占或 SDM 能力。官方自动更新仍可能覆盖自维护功能，暂不作为本分支升级渠道。
+日常同步在这个长期分支上合并 `origin/main`（本地远程 `origin` 是上游，`fork` 是个人 GitHub 仓库），不强推或反复改写已发布历史。宿主适配与两个模组分别提交；合并前保留快照。重点回归引擎互斥、旧会话事件隔离、静音、暂停 / seek、连续结束换曲和歌词时钟；模拟测试不证明真实 DAC 的独占或 SDM 能力。本分支的检查更新固定到个人发布源，不消费官方包；首次启用、版本标识和发布流程见 [个人版更新](personal-updates.md)。
 
 宿主改造入口是 `src/services/playbackBackend/`，不依赖具体引擎。Folium 边界在 `src/mods/folium/playbackBackends.ts`；模组声明 `playback.backend` 权限和 `playback.backends` 实验 opt-in 后，在主窗口通过 `folium.experimental['playback.backends'].register` 注册。完整结构类型来自 `contract.ts`，编辑后运行 `npm run folium:types` / `npm run folium:api`，不手改生成文件。
 

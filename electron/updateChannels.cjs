@@ -1,7 +1,16 @@
 // electron/updateChannels.cjs
 // Resolves the user-facing release lane to the electron-updater channel stored in packaged metadata.
+const { PERSONAL_UPDATES } = require('../shared/personalUpdates.cjs');
 
 const RELEASE_CHANNELS = {
+  personal: {
+    id: 'personal',
+    label: 'Personal · Playback Backends',
+    updaterChannel: PERSONAL_UPDATES.channel,
+    allowPrerelease: true,
+    updateEnabled: true,
+    rollingReleaseTag: PERSONAL_UPDATES.releaseTag,
+  },
   realeco: {
     id: 'realeco',
     label: 'Realeco',
@@ -58,6 +67,9 @@ function resolveReleaseChannel(version, declaredChannel) {
 
 function getReleaseUrl(channel, version, releasesUrl) {
   const release = resolveReleaseChannel(version, channel);
+  if (release.id === 'personal') {
+    return `https://github.com/${PERSONAL_UPDATES.owner}/${PERSONAL_UPDATES.repo}/releases/tag/${PERSONAL_UPDATES.releaseTag}`;
+  }
   if (release.rollingReleaseTag) {
     return `${releasesUrl}/tag/${release.rollingReleaseTag}`;
   }
@@ -73,6 +85,7 @@ function getUpdateProviderConfig(releaseChannel, github) {
   }
 
   if (releaseChannel.rollingReleaseTag) {
+    if (releaseChannel.id === 'personal') github = PERSONAL_UPDATES;
     return {
       provider: 'generic',
       url: `https://github.com/${github.owner}/${github.repo}/releases/download/${releaseChannel.rollingReleaseTag}/`,
@@ -95,6 +108,7 @@ function getUpdateDiscoveryConfig(releaseChannel, github) {
   }
 
   if (releaseChannel.rollingReleaseTag) {
+    if (releaseChannel.id === 'personal') github = PERSONAL_UPDATES;
     return {
       format: 'yaml',
       url: `https://github.com/${github.owner}/${github.repo}/releases/download/${releaseChannel.rollingReleaseTag}/${releaseChannel.updaterChannel}.yml`,

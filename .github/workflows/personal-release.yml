@@ -1,0 +1,99 @@
+name: Build personal playback backends
+
+# No push/schedule trigger: publishing requires an explicit manual dispatch with publish=true.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish packages to the personal update channel'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-playback-backends-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'origin652/folia-major' && github.ref == 'refs/heads/personal/playback-backends'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@master
+        if: runner.os != 'macOS'
+        with:
+          toolchain: stable
+      - name: Stamp personal source and version
+        run: node packaging/personal/stamp.cjs
+      - name: Build wallpaper helper
+        if: runner.os == 'Windows'
+        run: npm run build:wallpaper-helper
+      - name: Build windowtolayer
+        if: runner.os == 'Linux'
+        run: npm run build:windowtolayer
+      - name: Build Electron renderer
+        env:
+          ELECTRON: 'true'
+          APP_VERSION_LABEL: Personal
+          APP_RELEASE_CHANNEL: personal
+        run: npm run build
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/.mnn-src
+            build/mnn
+          key: mnn-${{ runner.os }}-${{ hashFiles('build/buildMnnRuntime.mjs', 'native/folia-mnn/**') }}
+      - name: Package without publishing
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --publish never --config.publish.channel=personal
+      - uses: actions/upload-artifact@v6
+        with:
+          name: personal-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.deb
+            release/*.rpm
+            release/*.tar.gz
+            release/*.blockmap
+            release/personal*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: inputs.publish == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: personal-*
+          path: personal-artifacts
+      - name: Publish payloads, then update channel metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node packaging/personal/publish.cjs personal-artifacts

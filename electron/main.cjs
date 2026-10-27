@@ -90,6 +90,8 @@ const {
   parseUpdateMetadataVersion,
   resolveReleaseChannel,
 } = require('./updateChannels.cjs');
+const { PERSONAL_UPDATES, isPersonalVersion } = require('../shared/personalUpdates.cjs');
+const { createUpdateActions } = require('./updateActions.cjs');
 const { resolveCacheLimit, selectEvictions } = require('./audioCachePrune.cjs');
 const { removeAudioCacheFileOfSize } = require('./audioCacheRemove.cjs');
 const { createAnalysisHost } = require('./analysis/host.cjs');
@@ -2578,11 +2580,8 @@ const MOD_SYSTEM_ENABLED_SETTING_KEY = 'MOD_SYSTEM_ENABLED';
 const DEFAULT_STAGE_API_PORT = 32107;
 const DEFAULT_OBS_BROWSER_SOURCE_PORT = 32108;
 const DEFAULT_LYRIC_API_PORT = 32109;
-const FOLIA_RELEASES_URL = 'https://github.com/chthollyphile/folia-major/releases';
-const FOLIA_GITHUB_REPOSITORY = {
-  owner: 'chthollyphile',
-  repo: 'folia-major',
-};
+const FOLIA_RELEASES_URL = `https://github.com/${PERSONAL_UPDATES.owner}/${PERSONAL_UPDATES.repo}/releases`;
+const FOLIA_GITHUB_REPOSITORY = PERSONAL_UPDATES;
 const WINDOWS_APP_USER_MODEL_ID = 'top.izuna.foliamajor';
 const REMOTE_CONTROL_WINDOW_TITLE = 'Folia Remote';
 const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 800;
@@ -3879,26 +3878,9 @@ function normalizeVersion(value) {
   return typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
 }
 
-function getPackagedReleaseChannel() {
-  try {
-    const packageJsonPath = path.join(app.getAppPath(), 'package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    return packageJson.foliaReleaseChannel;
-  } catch {
-    return null;
-  }
-}
-
 function getCurrentReleaseChannel() {
-  return resolveReleaseChannel(
-    app.getVersion(),
-    store.get(UPDATE_CHANNEL_SETTING_KEY) || getPackagedReleaseChannel(),
-  );
-}
-
-function normalizeUpdateChannelSelection(value) {
-  const channel = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return channel === 'realeco' || channel === 'limo' || channel === 'cielo' ? channel : null;
+  // This branch must never consume an official channel, including a previously saved choice.
+  return resolveReleaseChannel(app.getVersion(), PERSONAL_UPDATES.channel);
 }
 
 function getUpdateCheckSupportReason() {
@@ -4030,6 +4012,10 @@ function setupAutoUpdater() {
 
   updater.on('update-available', (info) => {
     const version = normalizeVersion(info?.version);
+    if (!isPersonalVersion(version)) {
+      setUpdateState({ status: 'error', availableVersion: null, error: 'Rejected update outside the personal channel.', downloadProgress: null });
+      return;
+    }
     setUpdateState({
       status: 'available',
       availableVersion: version || null,
@@ -4064,6 +4050,10 @@ function setupAutoUpdater() {
   });
 
   updater.on('update-downloaded', (info) => {
+    if (!isPersonalVersion(info?.version)) {
+      setUpdateState({ status: 'error', availableVersion: null, error: 'Rejected installer outside the personal channel.', downloadProgress: null });
+      return;
+    }
     setUpdateState({
       status: 'downloaded',
       availableVersion: normalizeVersion(info?.version) || updateState.availableVersion,
@@ -4073,8 +4063,10 @@ function setupAutoUpdater() {
   });
 
   updater.on('error', (error) => {
+    console.warn('[Updater] Personal update failed', error);
     setUpdateState({
-      status: 'error',
+      status: error?.code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' ? 'unpublished' : 'error',
+      availableVersion: null,
       error: error instanceof Error ? error.message : String(error),
       downloadProgress: null,
     });
@@ -4085,6 +4077,8 @@ function configureAutoUpdaterChannel(updater) {
   const releaseChannel = getCurrentReleaseChannel();
   updater.channel = releaseChannel.updaterChannel;
   updater.allowPrerelease = releaseChannel.allowPrerelease;
+  // electron-updater's channel setter enables downgrades; restore the safety policy afterwards.
+  updater.allowDowngrade = false;
 
   const providerConfig = getUpdateProviderConfig(releaseChannel, FOLIA_GITHUB_REPOSITORY);
   if (providerConfig) {
@@ -4092,7 +4086,7 @@ function configureAutoUpdaterChannel(updater) {
   }
 }
 
-async function downloadAvailableUpdate() {
+async function performUpdateDownload() {
   if (isDevUpdatePreviewEnabled()) {
     setUpdateState({ status: 'downloaded', error: null, downloadProgress: null });
     return getUpdateStatus();
@@ -4113,11 +4107,7 @@ async function downloadAvailableUpdate() {
     return getUpdateStatus();
   }
 
-  if (!updateState.availableVersion) {
-    await checkForUpdates({ manual: true });
-  }
-
-  if (!updateState.availableVersion) {
+  if (!isPersonalVersion(updateState.availableVersion)) {
     return getUpdateStatus();
   }
 
@@ -4135,7 +4125,16 @@ async function downloadAvailableUpdate() {
   return getUpdateStatus();
 }
 
-async function checkForUpdates({ manual = false } = {}) {
+const updateActions = createUpdateActions({
+  getStatus: getUpdateStatus,
+  check: performUpdateCheck,
+  download: performUpdateDownload,
+  autoDownloadEnabled: getAutoUpdateEnabled,
+});
+const checkForUpdates = (options) => updateActions.checkNow(options);
+const downloadAvailableUpdate = () => updateActions.downloadNow();
+
+async function performUpdateCheck({ manual = false } = {}) {
   if (isDevUpdatePreviewEnabled()) {
     const availableVersion = getDevUpdatePreviewVersion();
     setUpdateState({
@@ -4174,11 +4173,16 @@ async function checkForUpdates({ manual = false } = {}) {
       throw new Error('Failed to initialize auto updater.');
     }
 
-    updater.autoDownload = getAutoUpdateEnabled();
-    await updater.checkForUpdates();
+    // Validate the channel before explicitly downloading, even with automatic downloads enabled.
+    updater.autoDownload = false;
+    const result = await updater.checkForUpdates();
+    if (result && !isPersonalVersion(result.updateInfo?.version)) {
+      throw new Error('Rejected update metadata outside the personal channel.');
+    }
   } catch (error) {
     setUpdateState({
-      status: 'error',
+      status: error?.code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' ? 'unpublished' : 'error',
+      availableVersion: null,
       error: error instanceof Error ? error.message : String(error),
       lastCheckedAt: Date.now(),
       downloadProgress: null,
@@ -4214,13 +4218,17 @@ async function checkForManualUpdateAvailability() {
       signal: controller.signal,
     });
     if (!response.ok) {
+      if (response.status === 404) {
+        setUpdateState({ status: 'unpublished', availableVersion: null, error: null, lastCheckedAt: Date.now() });
+        return getUpdateStatus();
+      }
       throw new Error(`Update metadata request failed: ${response.status} ${response.statusText}`);
     }
 
     const metadata = await response.text();
     const latestVersion = parseUpdateMetadataVersion(metadata);
-    if (!latestVersion) {
-      throw new Error('Update metadata did not include a version.');
+    if (!isPersonalVersion(latestVersion)) {
+      throw new Error('Update metadata did not include a personal-channel version.');
     }
 
     const hasUpdate = compareVersions(latestVersion, app.getVersion()) > 0;
@@ -6486,11 +6494,8 @@ ipcMain.handle('save-settings', (event, key, value) => {
 
   let nextValue = value;
   if (key === UPDATE_CHANNEL_SETTING_KEY) {
-    const channel = normalizeUpdateChannelSelection(value);
-    if (!channel) {
-      return getPublicSettings();
-    }
-    nextValue = channel;
+    // The personal source is immutable. Re-saving settings must not reset a staged update.
+    return getPublicSettings();
   }
   if (key === GPU_PREFERENCE_SETTING_KEY) {
     if (normalizeGpuPreference(value) !== value) {
@@ -6628,8 +6633,10 @@ ipcMain.handle('save-settings', (event, key, value) => {
           error: error instanceof Error ? error.message : String(error),
         });
       });
-    } else {
+    } else if (!['checking', 'available', 'downloading', 'downloaded'].includes(updateState.status)) {
       setUpdateState({ status: 'disabled', error: null, availableVersion: null, downloadProgress: null });
+    } else {
+      publishUpdateStatus();
     }
   }
 
@@ -6637,30 +6644,6 @@ ipcMain.handle('save-settings', (event, key, value) => {
     publishUpdateStatus();
     if (Boolean(nextValue) && updateState.availableVersion) {
       downloadAvailableUpdate().catch((error) => {
-        setUpdateState({
-          status: 'error',
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }
-  }
-
-  if (key === UPDATE_CHANNEL_SETTING_KEY) {
-    const updater = ensureAutoUpdater();
-    if (updater) {
-      configureAutoUpdaterChannel(updater);
-    }
-
-    setUpdateState({
-      status: getUpdateCheckEnabled() && isUpdateCheckSupported() ? 'idle' : 'unsupported',
-      availableVersion: null,
-      updateUrl: FOLIA_RELEASES_URL,
-      error: null,
-      downloadProgress: null,
-    });
-
-    if (getUpdateCheckEnabled() && isPackagedUpdateRuntime() && isUpdateCheckSupported()) {
-      checkForUpdates().catch((error) => {
         setUpdateState({
           status: 'error',
           error: error instanceof Error ? error.message : String(error),

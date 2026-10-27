@@ -335,7 +335,33 @@ export const settingsCommands: CommandPaletteCommand[] = [
         { isAvailable: context => context?.settings.canAutoScanLocalLibrary() ?? true },
     ),
     createSettingsCommand('settings-desktop', 'Desktop settings', 'Open desktop app settings', ['desktop', 'electron', '桌面', '桌面端'], 'options', 'desktop', { platform: ['electron'] }),
-    createSettingsAnchorCommand('settings-update-channel', 'Update channel', 'Choose the desktop app release channel', ['release channel', 'realeco', 'limo', 'cielo', '更新通道', '发布通道'], 'updateCheck', { platform: ['electron'] }),
+    createSettingsAnchorCommand('settings-update-channel', 'Update channel', 'View the personal branch update source', ['release channel', 'personal branch', '更新通道', '发布通道'], 'updateCheck', { platform: ['electron'] }),
+    defineCommand({
+        id: 'updates-check',
+        group: 'settings',
+        platform: ['electron'],
+        title: 'Check for updates',
+        description: 'Check the personal playback-backends branch for a published build',
+        keywords: ['upgrade', 'personal release', '检查更新', '分支更新'],
+        execute: async (_input, context) => {
+            context.settings.openSettings('options', 'general', null, 'updateCheck');
+            await window.electron?.checkForUpdates();
+            return true;
+        },
+    }),
+    defineCommand({
+        id: 'updates-download',
+        group: 'settings',
+        platform: ['win'],
+        title: 'Update now',
+        description: 'Check and download the personal build; confirm restart in settings',
+        keywords: ['upgrade installer', 'personal build', '立即更新', '下载新版'],
+        execute: async (_input, context) => {
+            context.settings.openSettings('options', 'general', null, 'updateCheck');
+            await window.electron?.downloadUpdate();
+            return true;
+        },
+    }),
     {
         id: 'desktop-toggle-voice-input-pause',
         platform: ['win'],

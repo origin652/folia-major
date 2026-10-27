@@ -56,8 +56,8 @@ const GeneralPage: React.FC = () => {
             ? t('options.appLanguageZhCN')
             : resolvedLanguage === 'in' || resolvedLanguage?.startsWith('id') ? t('options.appLanguageInID') : t('options.appLanguageEnUS');
 
-    const isInternalBuild = electronSettings.UPDATE_CHANNEL === 'internal';
     const autoUpdateSupported = Boolean(updateStatus?.autoUpdateSupported);
+    const updateBusy = updateStatus?.status === 'checking' || updateStatus?.status === 'downloading';
 
     return (
         <>
@@ -103,13 +103,17 @@ const GeneralPage: React.FC = () => {
                             variant="quiet"
                             icon={RefreshCw}
                             onClick={() => void update.onCheckForUpdates()}
-                            disabled={!electronSettings.ENABLE_UPDATE_CHECK || !updateStatus?.updateCheckSupported || updateStatus?.status === 'checking'}
+                            disabled={!updateStatus?.updateCheckSupported || updateBusy}
                         >
-                            {update.updateBadgeLabel}
+                            {t('options.checkForUpdates')}
                         </Button>
                     )}
-                    foot={t(autoUpdateSupported ? 'options.autoUpdateGithubNotice' : 'options.updateCheckGithubNotice')}
+                    foot={t('options.personalUpdateNotice')}
                 >
+                    <Row notice={`${update.updateBadgeLabel} · v${updateStatus?.currentVersion ?? __APP_VERSION__}`} />
+                    {updateStatus?.status === 'error' && (
+                        <Row notice={t('options.personalUpdateFailed', { error: updateStatus.error ?? '' })} />
+                    )}
                     <FoundUpdateRow />
                     <Row
                         option={O.updateCheck}
@@ -131,17 +135,11 @@ const GeneralPage: React.FC = () => {
                             <Toggle checked={electronSettings.ENABLE_AUTO_UPDATE && autoUpdateSupported} onChange={() => void update.onToggleAutoUpdate()} />
                         </Row>
                     </Reveal>
-                    <Row option={O.updateChannel} disabled={isInternalBuild}>
+                    <Row option={O.updateChannel} hint={t('options.personalUpdateSource')} disabled>
                         <Select
                             value={electronSettings.UPDATE_CHANNEL}
-                            options={isInternalBuild
-                                ? [{ value: 'internal', label: t('options.updateChannelInternal') }]
-                                : [
-                                    { value: 'realeco', label: t('options.updateChannelRealeco') },
-                                    { value: 'limo', label: t('options.updateChannelLimo') },
-                                    { value: 'cielo', label: t('options.updateChannelCielo') },
-                                ]}
-                            onChange={channel => void update.onUpdateChannelChange(channel as 'realeco' | 'limo' | 'cielo')}
+                            options={[{ value: 'personal', label: t('options.updateChannelPersonal') }]}
+                            onChange={() => void update.onUpdateChannelChange('personal')}
                         />
                     </Row>
                 </Group>

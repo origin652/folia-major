@@ -11,7 +11,7 @@ Lyrics Reimagined // 辞曲新境
 
 简体中文 | [English](README.en.md)
 
-[![GitHub release](https://img.shields.io/github/v/release/chthollyphile/folia-major?label=release)](https://github.com/chthollyphile/folia-major/releases)
+[![Personal branch](https://img.shields.io/badge/branch-personal%2Fplayback--backends-blue)](https://github.com/origin652/folia-major/tree/personal/playback-backends)
 [![License](https://img.shields.io/github/license/chthollyphile/folia-major)](https://github.com/chthollyphile/folia-major/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/chthollyphile/folia-major?style=social)](https://github.com/chthollyphile/folia-major/stargazers)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -40,7 +40,7 @@ Lyrics Reimagined // 辞曲新境
 - 切换引擎会暂停、释放旧输出并保留进度，不自动恢复发声。设备、独占和 DSP 由各后端管理，不同时叠加两条处理链；HQPlayer 故障不会自动换成其他后端。
 - 模组源码与主程序分开维护。打包命令及限制见各自 README，接口说明见 [播放后端文档](docs/playback-backends.md)。HQPlayer 需自行安装；真实 SDM 输出尚未验证。
 
-> **更新提醒：** 当前应用更新源仍指向官方仓库。安装官方更新可能覆盖本分支的播放后端扩展；使用此自维护版时请关闭自动下载，不要直接安装官方更新。本分支未改动你已安装程序的设置，也未建立自己的自动更新发行渠道。
+> **个人版更新：** 本分支新增「设置 → 通用 → 更新检查」的**检查更新**和**立即更新**，更新源固定为本仓库 `personal/playback-backends` 的个人构建，不使用官方发行通道或网盘。Windows 下载完成后点击「重启安装」；macOS / Linux 提供完整安装包入口。需先手动安装一次带此功能的新安装包，推送源码不会改变已安装的旧程序；未发布安装包时会显示暂无更新包。分支发布说明见 [个人版更新](docs/personal-updates.md)。
 
 ## 项目简介
 
@@ -53,8 +53,8 @@ Folia是一个以全屏沉浸式歌词播放为核心的在线音乐播放器，
 ## 快速下载
 
 > [!TIP]
-> - **GitHub**：[Latest Release](https://github.com/chthollyphile/folia-major/releases/latest)，提供 Windows / macOS / Linux 全平台安装包。
-> - **网盘**：[夸克网盘](https://pan.quark.cn/s/6e4c6fa3bc6f) · [百度云](https://pan.baidu.com/s/1f0x3g-8PMcNCO-TJ5z1rPw?pwd=flia)（提取码 `flia`），适合国内网络，仅提供 Windows 与 Apple silicon 的正式版安装包。
+> - **个人版 GitHub**：[播放后端分支发布页](https://github.com/origin652/folia-major/releases/tag/personal-playback-backends)，只提供此分支已发布的构建；尚未发布时页面可能为 404。
+> - **上游官方版**：[官方 Releases](https://github.com/chthollyphile/folia-major/releases/latest) · [夸克网盘](https://pan.quark.cn/s/6e4c6fa3bc6f) · [百度云](https://pan.baidu.com/s/1f0x3g-8PMcNCO-TJ5z1rPw?pwd=flia)（提取码 `flia`），不包含本分支的播放后端扩展，不能作为个人版的升级包。
 >
 > 更多获取方式（Web 部署、Docker、AUR、Flatpak、移动端）见下方 [获取方式](#获取方式)。
 
@@ -158,13 +158,13 @@ Vercel 与 Cloudflare 上的 QQ 音乐不再需要额外部署一个常驻 API �
 
 ### 直接下载
 
-- **Windows / macOS / Linux**: 最新版本的安装包请前往 [Releases 页面](https://github.com/chthollyphile/folia-major/releases/latest) 下载。
+- **Windows / macOS / Linux 个人版**: 已发布的安装包请前往 [个人分支发布页](https://github.com/origin652/folia-major/releases/tag/personal-playback-backends) 下载。
 - **Arch Linux**: 可通过 AUR 获取 [folia-major-bin](https://aur.archlinux.org/packages/folia-major-bin)。
 - **Flatpak**: 社区提供的第三方 flatpak，详情见 [Flatpark](https://flatpark.org/apps/top.izuna.foliamajor/)。
 - **Android**: 社区第三方移植版见下方 [移动端](#移动端)。
 
 > [!IMPORTANT]
-> 如果国内网络从 GitHub Releases 下载较慢，可以使用 [夸克网盘](https://pan.quark.cn/s/6e4c6fa3bc6f) 或 [百度云](https://pan.baidu.com/s/1f0x3g-8PMcNCO-TJ5z1rPw?pwd=flia) 下载。网盘链接仅提供 Windows 与 Apple silicon 的正式版安装包.
+> 上述 AUR / Flatpak / 移动端和官方网盘不分发本个人分支。网盘仅提供 Windows 与 Apple silicon 的上游正式版，安装它们可能覆盖个人版功能。
 
 Linux 包、Wayland / Hyprland 遥控窗和桌面端细节见 [技术与开发说明](docs/technical.md)。
 

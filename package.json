@@ -8,7 +8,8 @@
     "email": "chthollyphile@users.noreply.github.com"
   },
   "private": true,
-  "version": "0.7.22",
+  "version": "0.7.22-personal.0",
+  "foliaReleaseChannel": "personal",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -73,15 +74,15 @@
       "zh-TW",
       "id"
     ],
-    "generateUpdatesFilesForAllChannels": true,
+    "generateUpdatesFilesForAllChannels": false,
     "directories": {
       "output": "release"
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "chthollyphile",
-        "repo": "folia-major"
+        "provider": "generic",
+        "url": "https://github.com/origin652/folia-major/releases/download/personal-playback-backends/",
+        "channel": "personal"
       }
     ],
     "files": [
