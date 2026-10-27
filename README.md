@@ -31,6 +31,17 @@ Lyrics Reimagined // 辞曲新境
 
 </div>
 
+## 自维护播放后端分支
+
+本分支 `personal/playback-backends` 是 [origin652/folia-major](https://github.com/origin652/folia-major/tree/personal/playback-backends) 的个人维护版，基于上游主线继续合并更新，不是官方发行版。
+
+- 保留主线的 Web Audio 和 mpv HiFi，在「设置 → 播放控制 → 播放引擎」统一选择；主线 mpv 仍只处理本地曲库和 Navidrome。
+- 保留通用 Folium 播放后端接口，以及独立的 [HQPlayer](extensions/hqplayer/README.md) 和 [Native Audio / SoXR](extensions/native-audio/README.md) 模组。启用模组不等于接管播放，需手动选择；模组选择仅在当前会话有效。
+- 切换引擎会暂停、释放旧输出并保留进度，不自动恢复发声。设备、独占和 DSP 由各后端管理，不同时叠加两条处理链；HQPlayer 故障不会自动换成其他后端。
+- 模组源码与主程序分开维护。打包命令及限制见各自 README，接口说明见 [播放后端文档](docs/playback-backends.md)。HQPlayer 需自行安装；真实 SDM 输出尚未验证。
+
+> **更新提醒：** 当前应用更新源仍指向官方仓库。安装官方更新可能覆盖本分支的播放后端扩展；使用此自维护版时请关闭自动下载，不要直接安装官方更新。本分支未改动你已安装程序的设置，也未建立自己的自动更新发行渠道。
+
 ## 项目简介
 
 Folia是一个以全屏沉浸式歌词播放为核心的在线音乐播放器，支持网易云、酷狗、QQ 音乐、Navidrome 和本地音乐库，桌面端还支持波点音乐、YouTube Music、Spotify 和汽水音乐，通过智能歌词匹配，AI生成配色主题，以及多种全屏歌词动画为用户提供独特的听歌体验。

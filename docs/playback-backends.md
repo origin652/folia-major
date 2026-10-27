@@ -1,5 +1,13 @@
 # 播放后端与独立模组
 
+## 自维护分支与上游同步
+
+`personal/playback-backends` 保留上游 mpv HiFi 和通用模组接口。统一入口在「播放控制 → 播放引擎」；`selection.ts` 先暂停并等待旧输出释放，再选择并准备新引擎，保留进度且不自动播放。主线 mpv 的来源限制、满音量确认和设备设置不变，显式选择模组时不再进入主线 mpv 路线。
+
+主线信号链路面板只适用于 Web Audio / 内置 mpv，使用模组时隐藏该入口，不把外部播放器误标成 Web Audio 或已确认直通。模组输出的设备 / 格式以模组遥测和播放器自身显示为准；HQPlayer 的真实 SDM 输出仍需单独验证。
+
+日常同步在这个长期分支上合并 `origin/main`（本地远程 `origin` 是上游，`fork` 是个人 GitHub 仓库），不强推或反复改写已发布历史。宿主适配与两个模组分别提交；合并前保留快照。重点回归引擎互斥、旧会话事件隔离、静音、暂停 / seek、连续结束换曲和歌词时钟；模拟测试不证明真实 DAC 的独占或 SDM 能力。官方自动更新仍可能覆盖自维护功能，暂不作为本分支升级渠道。
+
 宿主改造入口是 `src/services/playbackBackend/`，不依赖具体引擎。Folium 边界在 `src/mods/folium/playbackBackends.ts`；模组声明 `playback.backend` 权限和 `playback.backends` 实验 opt-in 后，在主窗口通过 `folium.experimental['playback.backends'].register` 注册。完整结构类型来自 `contract.ts`，编辑后运行 `npm run folium:types` / `npm run folium:api`，不手改生成文件。
 
 契约：`create(report)` 创建会话，`open` 准备暂停输出，`play/pause/seek/setVolume/dispose` 操作它；事件带每次加载唯一的 `sourceId`。实际输出遥测将 `exclusiveRequested` 与 `exclusiveActive` 分开；模组应依据设备确认，而不是照抄开关。宿主过滤退休会话/音源的事件，序列化准备与清理，使用原生时钟驱动既有 MotionValue 帧循环。
