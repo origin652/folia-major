@@ -187,6 +187,7 @@ Folium 是 Folia 的模组平台。模组可以添加新的歌词动画模式和
 - **API 参考**：[Folium API 参考](docs/folium/api.md)，由契约文件生成的完整接口文档，按注册表、上下文、事件、服务等分类查询。
 - **平台规范**：[Folium 规范](mods/README.md)，包括清单字段、权限、注册表语义、事件、安全模型与版本策略。
 - **示范模组**：仓库的 [`mods/`](mods/) 目录，覆盖歌词动画、调参、进度条、播放页图层与透明视频导出。
+- **实验性播放后端**：宿主接口与原生音频模组分离，见 [后端契约](docs/playback-backends.md) 和 [Native Audio（Windows x64，自带 SoXR，可选真独占）](extensions/native-audio/README.md)。默认仍使用 Web Audio；独占、DSP 和升频均须主动开启。
 
 ## Sync Server
 
