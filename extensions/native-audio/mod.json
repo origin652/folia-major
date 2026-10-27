@@ -1,0 +1,11 @@
+{
+    "folium": 1,
+    "id": "native-audio",
+    "name": "Native Audio / 原生音频",
+    "version": "0.1.1",
+    "description": "Independent native playback backend with bundled WASAPI/SoXR engine: high-bit-depth decoding, optional strict exclusive output and a bypassable DSP chain. Windows x64.",
+    "main": "index.cjs",
+    "client": "client.mjs",
+    "permissions": ["playback.backend", "playback.control"],
+    "experimental": ["playback.backends"]
+}

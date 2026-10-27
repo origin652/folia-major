@@ -1,0 +1,21 @@
+{
+    "platform": "win32-x64",
+    "url": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261021/mpv-x86_64-20261021-git-e471496c56.7z",
+    "sha256": "4a355f3e89c83fabc730d33fb4e759dfec747806ed2287b61a90d1681b83e8d3",
+    "release": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261021",
+    "recipes": "https://github.com/shinchiro/mpv-winbuild-cmake/tree/20261021",
+    "mpvCommit": "e471496c56",
+    "ffmpegCommit": "9a861e968",
+    "licenses": [
+        {
+            "name": "GPL-3.0.txt",
+            "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9a861e968/COPYING.GPLv3",
+            "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+            "name": "LGPL-2.1.txt",
+            "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9a861e968/COPYING.LGPLv2.1",
+            "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+        }
+    ]
+}
