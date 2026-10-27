@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { verifyProductionDependencies } = require('../packaging/verifyProductionDependencies.cjs');
 
 // build/afterPack.cjs
 
@@ -102,6 +103,7 @@ async function pruneLibrespotBinaries(context) {
 }
 
 exports.default = async (context) => {
+  verifyProductionDependencies(path.join(context.packager.getResourcesDir(context.appOutDir), 'app.asar'));
   await verifyBundledLocales(context);
   await verifyBundledMnn(context);
   await pruneLibrespotBinaries(context);

@@ -32,6 +32,10 @@
 
 ## 验证范围
 
+安装包生成后，`build/afterPack.cjs` 通过 `packaging/verifyProductionDependencies.cjs` 递归核对 ASAR 中的生产依赖（含已安装的可选依赖）。缺失必需传递依赖时立即失败，不再仅确认顶层包存在。打包目录使用独立的、按锁文件安装的生产依赖，不使用指向其他 worktree 的 `node_modules` junction；一次 `npm ci --omit=dev --ignore-scripts` 只应在独立构建目录执行，不能用于正在开发的共用依赖目录。
+
+`0.7.22-personal.0.1` 本地安装包漏收了 `electron-store` 的 `conf` 等传递依赖，不能启动，请勿分发。修正版使用新的版本号，不能用相同文件名覆盖已交付包。
+
 `test/unit/electron/personalUpdates.test.ts` 用内存 updater 执行主进程的实际更新接线，覆盖固定来源、旧通道偏好、重复请求、失败重试、无发布、关闭启动检查时的手动操作、下载状态保留和版本拒绝。`test/unit/settings/personalUpdatesPage.test.ts` 验证按钮启用条件、下载回调和显式重启安装。测试不会运行真实安装器或改动用户 profile。
 
 这些测试不代替 GitHub 三平台打包，也不证明真实旧安装版 → 新安装版的升级。首次发布后仍需用隔离安装目录验证下载安装、签名提示、重启和配置保留。
