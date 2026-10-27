@@ -56,6 +56,8 @@ import { hasFoliumEventHandlers } from '@/mods/folium/events';
 import { reconcileFoliumClients } from '@/mods/runtime/clientLoader';
 // The loader imports the client API on first use; loading it here keeps that out of the test's own time.
 import { listFoliumHostRegistries } from '@/mods/folium/api';
+// The experimental case also imports lazy services; keep cold transforms out of its 5 s timeout.
+import '@/mods/folium/experimental';
 import { FOLIUM_KIND_NAMES } from '@/mods/folium/kinds';
 
 // test/unit/mod-system/foliumHelpers.test.ts
@@ -485,8 +487,8 @@ describe('helpers on the folium object', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const optedIn = (generation: number): ModRuntimeInfo => ({
             ...mod('helpers-closed-all', keeperUrl(generation)),
-            permissions: ['stageLayers'],
-            experimental: ['omni.providers', 'omni.hooks', 'ponder.targets'],
+            permissions: ['stageLayers', 'playback.backend'],
+            experimental: ['omni.providers', 'omni.hooks', 'ponder.targets', 'playback.backends'],
         });
         await reconcileFoliumClients([optedIn(3)], 'main');
         const old = keptFolium();
@@ -505,7 +507,7 @@ describe('helpers on the folium object', () => {
             refused.push(`registries.${name}.register`);
         });
         const experimental = old.experimental as unknown as Record<string, Register & { on: (type: string, handler: () => void) => () => void }>;
-        ['omni.providers', 'ponder.targets'].forEach((name) => {
+        ['omni.providers', 'ponder.targets', 'playback.backends'].forEach((name) => {
             expect(experimental[name].register({ id: 'late' }).id).toBe('helpers-closed-all:late');
             refused.push(`experimental ${name}.register`);
         });

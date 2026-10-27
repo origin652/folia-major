@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
+import { getActiveLibrarySuiteId, isWallLibrarySuite, useActiveLibrarySuiteId } from '../../../../library/app/librarySuiteChoice';
 import { PLAYER_CONTROL_SLOT_OPTIONS } from '../../../floating-player/playerControlSlotActions';
 import FastColorPicker from '../../../shared/FastColorPicker';
 import { useColorPreviewThrottle } from '../../../shared/useColorPreviewThrottle';
@@ -12,6 +13,7 @@ import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { usePlayerBottomBarLayoutStore } from '../../../../stores/usePlayerBottomBarLayoutStore';
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
 import { setStatusMessage } from '../../../../stores/useStatusMessageStore';
+import { hasNowPlayingCardSong, useNowPlayingCardLayoutStore } from '../../../app/overlays/now-playing-toast/nowPlayingCardLayoutStore';
 import { useStageSettingsStore } from '../../../../stores/useStageSettingsStore';
 import { useTypographySettingsStore } from '../../../../stores/useTypographySettingsStore';
 import { ensureVideoLayerFileRestored, useVideoLayerSettingsStore, VIDEO_LAYER_OPACITY_BOUNDS } from '../../../../stores/useVideoLayerSettingsStore';
@@ -22,7 +24,8 @@ import { EntryViewPicture } from './pictures';
 // src/components/modal/settings/pages/PlayerPage.tsx
 // The 播放页 page: what the playing screen looks like. Which view play opens and the look of the
 // queue collage, the control bar, the now-playing card, the video behind the lyrics, and a folded
-// group of switches that hide or pin parts of the player.
+// group of switches that hide or pin parts of the player. The card's 在首页显示 switch is not drawn
+// while the home screen is a wall (bravais): the card is always on the wall, whatever it says.
 
 const VIEW: SettingsGroupDef = { id: 'playbackEntryView', titleKey: 'options.settingsHeadingView' };
 const BAR: SettingsGroupDef = { id: 'bottomUiSettings', titleKey: 'options.settingsHeadingControlBar' };
@@ -45,7 +48,8 @@ const O = {
     controlSlots: option(BAR, 'playerControlSlots', 'options.playerControlSlots'),
     cardMode: option(CARD, 'stageTrackPillMode', 'options.stageTrackPillMode'),
     cardTimeout: option(CARD, 'stageTrackPillTimeout', 'options.stageTrackPillTimeout'),
-    cardOnHome: option(CARD, 'stageTrackPillOnHome', 'options.stageTrackPillOnHome'),
+    cardPosition: option(CARD, 'stageTrackPillReposition', 'options.stageTrackPillReposition'),
+    cardOnHome: option(CARD, 'stageTrackPillOnHome', 'options.stageTrackPillOnHome', { available: () => !isWallLibrarySuite(getActiveLibrarySuiteId()) }),
     cardCloseButton: option(CARD, 'showOpenPanelCloseButton', 'options.showOpenPanelCloseButton'),
     videoEnabled: option(VIDEO, 'videoLayerEnabled', 'options.videoLayerEnabled'),
     videoFile: option(VIDEO, 'videoLayerLocalFile', 'options.videoLayerLocalFile'),
@@ -131,6 +135,10 @@ const PlayerPage: React.FC = () => {
     const hideSubtitle = useTypographySettingsStore(state => state.hidePlayerTranslationSubtitle);
     const setHideSubtitle = useTypographySettingsStore(state => state.handleToggleHidePlayerTranslationSubtitle);
     const hasCurrentSong = usePlaybackStore(state => Boolean(state.currentSong));
+    const canPositionCard = usePlaybackStore(hasNowPlayingCardSong);
+    const requestCardPosition = useNowPlayingCardLayoutStore(state => state.requestPositioning);
+    // Same test App asks the card with (homeIsWall).
+    const homeIsWall = isWallLibrarySuite(useActiveLibrarySuiteId());
     const requestPositioning = usePlayerBottomBarLayoutStore(state => state.requestPositioning);
     const tintColorPreview = useColorPreviewThrottle(lattice.setTintColor);
 
@@ -264,6 +272,12 @@ const PlayerPage: React.FC = () => {
             </Group>
 
             <Group def={CARD}>
+                <Row
+                    option={O.cardPosition}
+                    hint={canPositionCard ? undefined : t('options.stageTrackPillRepositionUnavailable')}
+                    onClick={requestCardPosition}
+                    disabled={!canPositionCard}
+                />
                 <Row option={O.cardMode} note={t('options.stageTrackPillDesc')}>
                     <Segmented
                         value={card.mode}
@@ -280,11 +294,13 @@ const PlayerPage: React.FC = () => {
                         <Slider value={card.timeoutSec} min={3} max={60} onChange={card.setTimeoutSec} format={value => `${value}s`} />
                     </Row>
                 </Reveal>
-                <Reveal when={card.mode !== 'never'}>
-                    <Row option={O.cardOnHome} note={t('options.stageTrackPillOnHomeDesc')}>
-                        <Toggle checked={card.onHome} onChange={card.setOnHome} />
-                    </Row>
-                </Reveal>
+                {!homeIsWall && (
+                    <Reveal when={card.mode !== 'never'}>
+                        <Row option={O.cardOnHome} note={t('options.stageTrackPillOnHomeDesc')}>
+                            <Toggle checked={card.onHome} onChange={card.setOnHome} />
+                        </Row>
+                    </Reveal>
+                )}
                 <Row option={O.cardCloseButton} hint={t('options.showOpenPanelCloseButtonDesc')}>
                     <Toggle checked={chrome.cardCloseButton} onChange={chrome.setCardCloseButton} />
                 </Row>

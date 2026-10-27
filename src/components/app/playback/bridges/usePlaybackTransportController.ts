@@ -12,6 +12,9 @@ import type { OnlineRecovery, OnlineRecoveryOptions } from '../restore/createOnl
 import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { onlineFailureToast } from '../source/onlineFailureToast';
 import { backendPlayback, usesPlaybackBackend } from '../../../../services/playbackBackend/controller';
+import { hifiTransport, isHifiRoute } from '../../../../services/hifi/hifiPlayback';
+import { resumeHifiPlayback } from '../../../hifi/hifiRouteTransport';
+import { isPlaybackEngineSwitching } from '../../../../services/playbackBackend/registry';
 
 // src/components/app/playback/bridges/usePlaybackTransportController.ts
 
@@ -77,11 +80,18 @@ export function usePlaybackTransportController({
     }, []);
 
     const resumePlayback = useCallback(async () => {
-        if (isNowPlayingStageActive) {
+        if (isNowPlayingStageActive || isPlaybackEngineSwitching()) {
             return;
         }
         const revision = ++transportRevision.current;
         wantsPlayback.current = true;
+
+        // mpv plays this song: no AudioContext, fade or analyser on that route. A replay after the
+        // queue ended (mpv was stopped) goes through playSong, which writes the state itself.
+        if (isHifiRoute()) {
+            if (resumeHifiPlayback()) setPlayerState(PlayerState.PLAYING);
+            return;
+        }
 
         if (activePlaybackContext === 'stage' && stageActiveEntryKind === 'lyrics' && !audioSrc) {
             const currentSyntheticTime = getSyntheticStageLyricsTime();
@@ -216,6 +226,13 @@ export function usePlaybackTransportController({
 
         if (usesPlaybackBackend() && activePlaybackContext !== 'stage') {
             void backendPlayback.pause().catch(error => console.error('[PlaybackBackend] Pause failed', error));
+            setPlayerState(PlayerState.PAUSED);
+            return;
+        }
+
+        // Before the fade logic: the fade graph belongs to the Web Audio route, and mpv pauses at once.
+        if (isHifiRoute()) {
+            void hifiTransport.pause();
             setPlayerState(PlayerState.PAUSED);
             return;
         }

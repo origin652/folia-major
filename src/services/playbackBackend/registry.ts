@@ -11,6 +11,10 @@ const entries = new Map<string, PlaybackBackendEntry>();
 const listeners = new Set<() => void>();
 let snapshot: readonly PlaybackBackendEntry[] = [];
 let selected: string | null = null;
+let switching = false;
+
+export const isPlaybackEngineSwitching = () => switching;
+export const setPlaybackEngineSwitching = (value: boolean) => { switching = value; };
 
 const notify = () => {
     snapshot = Object.freeze([...entries.values()]);

@@ -7,16 +7,21 @@ import { usePlaybackStore, setPlayerState } from '../../../../stores/usePlayback
 import { setStatusMessage } from '../../../../stores/useStatusMessageStore';
 import { currentTime } from '../../../../stores/motionSignals';
 import { PlayerState } from '../../../../types';
+import { isLocalPlaybackSong, isNavidromePlaybackSong } from '../../../../utils/appPlaybackGuards';
+import { bindPlaybackEngineReload, subscribePlaybackEngineSwitch } from '../../../../services/playbackBackend/selection';
+import { isPlaybackEngineSwitching } from '../../../../services/playbackBackend/registry';
+import type { HifiPlaySong } from '../../../hifi/hifiRouteTransport';
 
 // UI half of the generic backend seam; the engine remains entirely outside the host.
 
-export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTimeRef, shouldAutoPlayRef, loopMode, onEnded }: {
+export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTimeRef, shouldAutoPlayRef, loopMode, onEnded, playSong }: {
     audioRef: RefObject<HTMLAudioElement | null>;
     audioContextRef: MutableRefObject<AudioContext | null>;
     pendingResumeTimeRef: MutableRefObject<number | null>;
     shouldAutoPlayRef: MutableRefObject<boolean>;
     loopMode: string;
     onEnded: () => void;
+    playSong: HifiPlaySong;
 }) => {
     const selected = useSyncExternalStore(subscribePlaybackBackends, selectedPlaybackBackend);
     const entry = useSyncExternalStore(subscribePlaybackBackends, getPlaybackBackend);
@@ -28,6 +33,27 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
     repeat.current = loopMode;
     const previousSelection = useRef(selected);
     const { t } = useTranslation();
+    const switchingEngine = useSyncExternalStore(subscribePlaybackEngineSwitch, isPlaybackEngineSwitching);
+
+    useEffect(() => bindPlaybackEngineReload(async (song, position) => {
+        shouldAutoPlayRef.current = false;
+        pendingResumeTimeRef.current = position;
+        if (song && (isLocalPlaybackSong(song) || isNavidromePlaybackSong(song))) {
+            await playSong(song, undefined, undefined, {
+                autoplay: false, startAtSec: position, quietLoadedToast: true, shouldNavigateToPlayer: false,
+            });
+        }
+    }, async () => {
+        audioRef.current?.pause();
+        const context = audioContextRef.current;
+        if (context?.state === 'running') await context.suspend();
+    }), [audioContextRef, audioRef, pendingResumeTimeRef, playSong, shouldAutoPlayRef]);
+
+    useEffect(() => {
+        if (!switchingEngine) return;
+        shouldAutoPlayRef.current = false;
+        audioRef.current?.pause();
+    }, [audioRef, shouldAutoPlayRef, switchingEngine]);
 
     useEffect(() => {
         if (previousSelection.current === selected) return;
@@ -60,7 +86,7 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
     }), [t]);
 
     useEffect(() => {
-        if (!selected) return;
+        if (!selected || switchingEngine) return;
         audioRef.current?.pause();
         if (audioContextRef.current?.state === 'running') {
             void audioContextRef.current.suspend().catch(error => console.warn('[PlaybackBackend] Suspending Web Audio failed', error));
@@ -85,7 +111,7 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
             setStatusMessage({ type: 'error', text: t('options.playbackBackendFailed') });
         });
         return () => { cancelled = true; };
-    }, [selected, entry, audioSrc, activeContext, audioRef, audioContextRef, pendingResumeTimeRef, t]);
+    }, [selected, entry, audioSrc, activeContext, audioRef, audioContextRef, pendingResumeTimeRef, switchingEngine, t]);
 
-    return selected !== null;
+    return { backendActive: selected !== null, switchingEngine };
 };

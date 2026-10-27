@@ -1,6 +1,7 @@
 import { getPlaybackBackend, selectedPlaybackBackend, subscribePlaybackBackends } from './registry';
 import { prepareBackendSource } from './source';
 import type { PlaybackBackendDefinition, PlaybackBackendEvent, PlaybackBackendSession, PlaybackBackendStatus } from './types';
+import { backendMediaShim } from '../hifi/hifiMediaShim';
 
 // Serializes transport intent around asynchronous opens; stale sessions cannot move the host clock.
 
@@ -19,6 +20,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     let sourceId = '';
     let sourceUrl = '';
     let ready: Promise<void> = Promise.resolve();
+    let retired: { session: PlaybackBackendSession; source: PreparedSource | null } | null = null;
     let status: PlaybackBackendStatus = { sourceId, state: 'stopped', position: 0, duration: 0 };
     let capturedAt = performance.now();
 
@@ -50,12 +52,13 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     };
 
     const setBackend = async (next: PlaybackBackendDefinition | null, force = false) => {
-        if (definition === next && !force) return;
+        if (definition === next && !force && !retired) return ready;
         const token = ++generation;
         revision++;
         wantsPlay = false;
         const previous = session;
         const previousSource = prepared;
+        if (previous) retired = { session: previous, source: previousSource };
         session = null;
         definition = next;
         prepared = null;
@@ -66,8 +69,12 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         const previousReady = ready;
         ready = (async () => {
             await previousReady.catch(() => {});
-            try { await previous?.dispose(); }
-            finally { await release(previousSource); }
+            if (retired) {
+                const retiring = retired;
+                await retiring.session.dispose();
+                await release(retiring.source);
+                if (retired === retiring) retired = null;
+            }
             if (token === generation && next) session = next.create(event => report(event, token));
         })();
         await ready;
@@ -161,6 +168,23 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
 };
 
 export const backendPlayback = createBackendController();
+backendMediaShim.setClockReader(backendPlayback.getPosition);
+let observedSource = '';
+backendPlayback.subscribe(event => {
+    if (event.type === 'status') {
+        const { status } = event;
+        if (status.sourceId !== observedSource) {
+            observedSource = status.sourceId;
+            if (observedSource) backendMediaShim.beginTrack(observedSource);
+            else backendMediaShim.reset();
+        }
+        backendMediaShim.setDuration(status.duration);
+        if (status.state === 'playing') {
+            if (backendMediaShim.paused) backendMediaShim.markPlaying();
+        } else backendMediaShim.markPaused();
+    } else if (event.type === 'ended') backendMediaShim.markEnded();
+    else backendMediaShim.markPaused();
+});
 export const usesPlaybackBackend = () => selectedPlaybackBackend() !== null;
 subscribePlaybackBackends(() => {
     void backendPlayback.setBackend(getPlaybackBackend()?.definition ?? null).catch(error => {

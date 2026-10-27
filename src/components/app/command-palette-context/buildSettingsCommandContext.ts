@@ -3,6 +3,10 @@ import type { LyricStaffPolicy } from '../../../utils/lyrics/staffCreditsPolicy'
 import type { ThemeGenerationSource } from '../../../services/themePreferences';
 import { useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
 import { useAutomixSettingsStore } from '../../../stores/useAutomixSettingsStore';
+import { useHifiSettingsStore } from '../../../stores/useHifiSettingsStore';
+import { hifiEngine, useHifiEngineStore } from '../../../services/hifi/hifiEngine';
+import { HIFI_PLATFORM } from '../../modal/settings/pages/hifi/options';
+import { canOfferRuntimeDownload, isRuntimeInstalling } from '../../modal/settings/pages/hifi/runtimeState';
 import { useDesktopSettingsStore } from '../../../stores/useDesktopSettingsStore';
 import { useLocalLibrarySettingsStore } from '../../../stores/useLocalLibrarySettingsStore';
 import { isLocalLibraryAutoScanSupported } from '../../../services/localLibraryAutoScan';
@@ -15,6 +19,7 @@ import { usePlaybackEntryViewStore } from '../../../stores/usePlaybackEntryViewS
 import { hasLibrarySuiteChoice } from '../../../library/registry';
 import { chooseLibrarySuite, getActiveLibrarySuiteId, listLibrarySuiteOptions } from '../../../library/app/librarySuiteChoice';
 import { isBravaisLibraryActive } from '../../../library/app/bravaisLibraryActive';
+import { isGridLibraryActive } from '../../../library/app/gridLibraryActive';
 import { useLibraryWallLookStore } from '../../../stores/useLibraryWallLookStore';
 import { usePonderStore } from '../../../stores/usePonderStore';
 import { useHomeLayoutSettingsStore } from '../../../stores/useHomeLayoutSettingsStore';
@@ -27,6 +32,8 @@ import { useThemeQuickEditorStore } from '../../../stores/useThemeQuickEditorSto
 import { usePlayerBottomBarLayoutStore } from '../../../stores/usePlayerBottomBarLayoutStore';
 import type { SongResult } from '../../../types';
 import { cycleSubtitleContentMode } from '../../../utils/lyrics/alternateText';
+import { selectPlaybackEngine } from '../../../services/playbackBackend/selection';
+import { selectedPlaybackBackend } from '../../../services/playbackBackend/registry';
 
 // src/components/app/command-palette-context/buildSettingsCommandContext.ts
 // The `settings` namespace of the palette context.
@@ -92,6 +99,8 @@ export const buildSettingsCommandContext = (
         chooseLibrarySuite,
         // bravais 的透光偏好：与设置分区同一个谓词；值与 setter 都现读 store（面板开着时也会变）。
         isLibraryWallLookAvailable: isBravaisLibraryActive,
+        // 只有网格界面读的设置（首页卡片、网格卡片、海报墙按钮）：与设置页同一个谓词。
+        isGridLibraryActive,
         libraryWallLook: () => useLibraryWallLookStore.getState().look,
         setLibraryWallLook: look => useLibraryWallLookStore.getState().setLook(look),
         libraryWallWindowsPerBlock: () => useLibraryWallLookStore.getState().windowsPerBlock,
@@ -220,6 +229,9 @@ export const buildSettingsCommandContext = (
         toggleRemoteControlExpandCover: () => desktop.handleToggleRemoteControlExpandCover(
             !useDesktopSettingsStore.getState().remoteControlExpandCover,
         ),
+        toggleRemoteControlTextShade: () => desktop.handleToggleRemoteControlTextShade(
+            !useDesktopSettingsStore.getState().remoteControlTextShade,
+        ),
         unlockRemoteControl: () => desktop.handleToggleRemoteControlClickThrough(false),
         toggleObsKeepMainWindowAnimation: () => useStageSettingsStore.getState().handleToggleObsKeepMainWindowAnimation(
             !useStageSettingsStore.getState().obsKeepMainWindowAnimation,
@@ -256,5 +268,35 @@ export const buildSettingsCommandContext = (
             !useAutomixSettingsStore.getState().transitionPerformance,
         ),
         canUseTransitionPerformance: deps.canUseTransitionPerformance,
+        // Read at the press, like the settings page: none of these rebuild the context.
+        isHifiSupported: () => useHifiEngineStore.getState().supported,
+        isHifiEnabled: () => selectedPlaybackBackend() === null && useHifiSettingsStore.getState().enabled,
+        isHifiVolumeConfirmed: () => useHifiSettingsStore.getState().volumeConfirmed,
+        setHifiEnabled: enabled => {
+            void selectPlaybackEngine(enabled ? 'mpv' : 'web').catch(error => console.error('[PlaybackBackend] Engine selection failed', error));
+        },
+        toggleHifiExclusive: () => {
+            const hifi = useHifiSettingsStore.getState();
+            hifi.setExclusive(!hifi.exclusive);
+        },
+        toggleHifiNavidrome: () => {
+            const hifi = useHifiSettingsStore.getState();
+            hifi.setNavidrome(!hifi.navidrome);
+        },
+        toggleHifiSoftwareVolume: () => {
+            const hifi = useHifiSettingsStore.getState();
+            hifi.setSoftwareVolume(!hifi.softwareVolume);
+        },
+        // The HiFi page's runtime row asks the same questions (runtimeState.ts).
+        canRedetectHifiRuntime: () => {
+            const engine = useHifiEngineStore.getState();
+            return engine.supported && !isRuntimeInstalling(engine.runtime, engine.installProgress);
+        },
+        redetectHifiRuntime: () => hifiEngine.detect(),
+        canInstallHifiRuntime: () => {
+            const engine = useHifiEngineStore.getState();
+            return engine.supported && canOfferRuntimeDownload(engine.runtime, engine.installProgress, HIFI_PLATFORM);
+        },
+        installHifiRuntime: () => hifiEngine.install(),
     };
 };

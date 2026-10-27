@@ -136,7 +136,7 @@ export const createFoliumExperimental = (
     [FOLIUM_EXPERIMENTAL.playbackBackends]: Object.freeze({
         register: (def: FoliumPlaybackBackendDefinition) => {
             if (!mod.permissions.includes('playback.backend')) throw new Error('permission-denied:playback.backend');
-            return stopped('playback.backends.register')
+            return stopped('experimental playback.backends.register')
                 ? inertFoliumHandle(mod.id, def?.id)
                 : playbackBackendsRegistry.register(mod.id, def);
         },

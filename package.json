@@ -8,7 +8,7 @@
     "email": "chthollyphile@users.noreply.github.com"
   },
   "private": true,
-  "version": "0.7.21",
+  "version": "0.7.22",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -70,6 +70,7 @@
     "electronLanguages": [
       "en-US",
       "zh-CN",
+      "zh-TW",
       "id"
     ],
     "generateUpdatesFilesForAllChannels": true,
@@ -150,6 +151,12 @@
       }
     ],
     "mac": {
+      "electronLanguages": [
+        "en",
+        "zh_CN",
+        "zh_TW",
+        "id"
+      ],
       "extraResources": [
         {
           "from": "build/koffi/darwin_${arch}",
@@ -204,6 +211,12 @@
         "id"
       ],
       "include": "build/installer.nsh"
+    },
+    "rpm": {
+      "fpm": [
+        "--rpm-rpmbuild-define",
+        "_build_id_links none"
+      ]
     },
     "linux": {
       "artifactName": "${name}-${version}-linux-${arch}.${ext}",
@@ -282,7 +295,6 @@
     "fake-indexeddb": "^6.2.5",
     "framer-motion": "^13.4.3",
     "i18next": "^26.4.2",
-    "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^1.48.0",
     "opencc-js": "^1.4.2",
     "pinyin-pro": "3.29.3",

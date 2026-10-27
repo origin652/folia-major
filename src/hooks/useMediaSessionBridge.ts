@@ -8,9 +8,13 @@ import {
     isMediaSessionSourceReady,
     publishMediaSessionTrack,
 } from '../utils/mediaSessionSync';
+import { usePlaybackStore } from '../stores/usePlaybackStore';
+import { useHifiTrackStore } from '../services/hifi/hifiPlayback';
+import { backendMediaShim, getObservedMedia, hifiMediaShim } from '../services/hifi/hifiMediaShim';
+import { usePlaybackBackendSource } from './usePlaybackBackendSource';
 
 // Bridges Folia playback state to the browser Media Session API.
-type UseMediaSessionBridgeOptions = {
+export type UseMediaSessionBridgeOptions = {
     audioRef: RefObject<HTMLAudioElement | null>;
     /**
      * The deck the displayed track is playing on, or null when the picture is live.
@@ -50,6 +54,12 @@ export const useMediaSessionBridge = ({
     mediaSessionNextRef,
     isNowPlayingControlDisabledRef,
 }: UseMediaSessionBridgeOptions) => {
+    // On the HiFi route mpv sounds the song: the position comes off the HiFi media shim, and its
+    // source (one per HiFi track) stands in for `audioSrc`, which is null there.
+    const playbackRoute = usePlaybackStore(state => state.playbackRoute);
+    const backendSource = usePlaybackBackendSource();
+    const hifiTrackKey = useHifiTrackStore(state => state.current?.trackKey ?? null);
+
     useEffect(() => {
         if (!('mediaSession' in navigator)) {
             return;
@@ -123,8 +133,11 @@ export const useMediaSessionBridge = ({
 
         // The displayed track's own deck, so the position published below belongs to the title
         // published beside it. Falls back to the active deck whenever no blend is holding a picture.
-        const audio = getDisplayAudioElement?.() ?? audioRef.current;
-        if (!audio || !audioSrc) {
+        const audio = getObservedMedia(getDisplayAudioElement?.() ?? audioRef.current);
+        // The shim switched to this track before the track store named it, so its source is current here.
+        const expectedSource = audio === backendMediaShim ? backendMediaShim.currentSrc
+            : playbackRoute === 'hifi' ? hifiMediaShim.currentSrc : audioSrc;
+        if (!audio || !expectedSource) {
             return;
         }
 
@@ -133,7 +146,7 @@ export const useMediaSessionBridge = ({
         let artworkUrl = getSupportedMediaSessionArtworkUrl(sourceArtworkUrl, document.baseURI);
         let disposableArtworkUrl: string | null = null;
         const publish = () => {
-            if (disposed || !isMediaSessionSourceReady(audio, audioSrc, document.baseURI)) {
+            if (disposed || !isMediaSessionSourceReady(audio, expectedSource, document.baseURI)) {
                 return;
             }
 
@@ -189,7 +202,7 @@ export const useMediaSessionBridge = ({
             audio.removeEventListener('playing', publish);
             if (disposableArtworkUrl) URL.revokeObjectURL(disposableArtworkUrl);
         };
-    }, [audioRef, audioSrc, cachedCoverUrl, currentSong, getDisplayAudioElement, unknownArtistLabel]);
+    }, [audioRef, audioSrc, backendSource, cachedCoverUrl, currentSong, getDisplayAudioElement, hifiTrackKey, playbackRoute, unknownArtistLabel]);
 
     useEffect(() => {
         if (!('mediaSession' in navigator)) {

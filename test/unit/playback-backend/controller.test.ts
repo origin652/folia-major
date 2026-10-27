@@ -52,6 +52,24 @@ describe('backend registry', () => {
 });
 
 describe('backend controller', () => {
+    it('retains failed cleanup and never creates another output or releases its source until disposal succeeds', async () => {
+        const old = mockBackend();
+        const next = mockBackend();
+        const create = vi.spyOn(next.definition, 'create');
+        const source = staged();
+        const c = createBackendController(source.prepare);
+        await c.setBackend(old.definition);
+        await c.open('https://test/playing');
+        vi.mocked(old.session.dispose).mockRejectedValueOnce(new Error('output still active'));
+        await expect(c.setBackend(next.definition)).rejects.toThrow('output still active');
+        expect(create).not.toHaveBeenCalled();
+        expect(source.release).not.toHaveBeenCalled();
+        await c.setBackend(next.definition);
+        expect(old.session.dispose).toHaveBeenCalledTimes(2);
+        expect(source.release).toHaveBeenCalledOnce();
+        expect(create).toHaveBeenCalledOnce();
+        await c.setBackend(null);
+    });
     it('awaits backend creation when selection and open happen together', async () => {
         const b = mockBackend();
         const s = staged();
