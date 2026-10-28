@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld('electron', {
         stage: (data) => ipcRenderer.invoke('playback-source-stage', data),
         stream: (url, context) => ipcRenderer.invoke('playback-source-stream', url, context),
         markPlayed: (id) => ipcRenderer.invoke('playback-source-played', id),
+        progress: (id, seconds) => ipcRenderer.invoke('playback-source-progress', id, seconds),
         streamError: (id) => ipcRenderer.invoke('playback-source-stream-error', id),
         release: (id) => ipcRenderer.invoke('playback-source-release', id),
     },

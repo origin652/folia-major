@@ -4,7 +4,7 @@ export default {
   "audioArchive": {
     "title": "Arsip audio yang diputar", "enabled": "Arsipkan audio lengkap", "directory": "Direktori arsip", "choose": "Pilih folder",
     "chooseFirst": "Pilih folder arsip terpisah dahulu", "directoryHint": "Disimpan menurut penyedia / daftar putar / artis - judul. Ganti folder menonaktifkan pengarsipan. Pembersihan cache tidak menghapus arsip.",
-    "description": "Nonaktif secara bawaan. Simpan byte asli dari mod pemutaran HTTP setelah pemutaran dimulai serta pemeriksaan kelengkapan dan durasi lolos. Tanpa unduhan tambahan atau kompresi ulang. Pencarian dan antrean campuran memakai Unsorted.",
+    "description": "Nonaktif secara bawaan. Arsipkan audio asli terverifikasi dari mod HTTP. Pada progres 80%, bagian yang kurang dilengkapi di latar belakang meski berganti lagu. Gunakan kembali byte sesi ini dengan ETag kuat yang sama, tanpa mengunduh ulang seluruh lagu atau kompresi ulang. Pencarian dan antrean campuran memakai Unsorted.",
     "preferLocal": "Utamakan arsip lokal", "preferHint": "Arsip terverifikasi dengan sumber, lagu, dan kualitas sama menghindari permintaan audio daring. File hilang, rusak, atau berbeda kualitas memakai sumber biasa. Lirik masih dapat memakai jaringan.",
     "status": "Sesi ini", "saved": "{{count}} lagu diarsipkan", "refresh": "Segarkan status", "failed": "Tindakan arsip gagal",
     "limits": "Pengarsipan saat ini mendukung mod HTTP; keluaran lain dapat memutar arsip. Batas 512 MiB per lagu. Pratinjau, protokol tersegmentasi, panjang tidak diketahui, dan data tidak lengkap dilewati. Kelola ruang sendiri dan simpan hanya audio yang berhak Anda arsipkan."

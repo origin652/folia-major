@@ -10,7 +10,7 @@ const setup = () => {
     const handlers = new Map<string, (...args: any[]) => any>();
     const contents = Object.assign(new EventEmitter(), { id: 7, mainFrame: {} });
     const files = { stage: vi.fn(), release: vi.fn() };
-    const streams = { create: vi.fn(), release: vi.fn(), releaseOwner: vi.fn(), getError: vi.fn() };
+    const streams = { create: vi.fn(), release: vi.fn(), releaseOwner: vi.fn(), getError: vi.fn(), markPlayed: vi.fn(), progress: vi.fn() };
     registerPlaybackSourceIpc({ ipcMain: { handle: (name: string, action: any) => handlers.set(name, action) }, files, streams,
         isTrusted: (sender: unknown) => sender === contents });
     const event = { sender: contents, senderFrame: contents.mainFrame };
@@ -28,6 +28,8 @@ describe('playback stream IPC', () => {
         expect(s.streams.create).toHaveBeenCalledWith('https://cdn.test/signed', 7);
         s.handlers.get('playback-source-stream-error')!(s.event, 'id');
         expect(s.streams.getError).toHaveBeenCalledWith('id', 7);
+        s.handlers.get('playback-source-progress')!(s.event, 'id', 80);
+        expect(s.streams.progress).toHaveBeenCalledWith('id', 7, 80);
         await s.handlers.get('playback-source-release')!(s.event, 'id');
         expect(s.streams.release).toHaveBeenCalledWith('id', 7);
         expect(s.files.release).toHaveBeenCalledWith('id');

@@ -25,6 +25,7 @@ const registerPlaybackSourceIpc = ({ ipcMain, files, streams, isTrusted }) => {
     ipcMain.handle('playback-source-stream', (event, url, context) => context === undefined
         ? streams.create(url, owner(event)) : streams.create(url, owner(event), context));
     ipcMain.handle('playback-source-played', (event, id) => streams.markPlayed(id, owner(event)));
+    ipcMain.handle('playback-source-progress', (event, id, seconds) => streams.progress(id, owner(event), seconds));
     ipcMain.handle('playback-source-stream-error', (event, id) => streams.getError(id, owner(event)));
     ipcMain.handle('playback-source-release', async (event, id) => {
         streams.release(id, owner(event));

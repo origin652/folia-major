@@ -42,7 +42,10 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 || !Number.isFinite(event.status.duration) || event.status.duration < 0
                 || !['loading', 'playing', 'paused', 'stopped'].includes(event.status.state)) return;
             status = { ...event.status };
-            if (status.state === 'playing') prepared?.markPlayed?.();
+            if (status.state === 'playing') {
+                prepared?.markPlayed?.();
+                prepared?.progress?.(status.position);
+            }
             capturedAt = performance.now();
         } else {
             wantsPlay = false;

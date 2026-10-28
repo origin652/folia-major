@@ -129,7 +129,7 @@ describe('played audio archive', () => {
         const lease = await store.create('https://synthetic.test/a.wav?token=must-not-be-saved', 7, context);
         const response = await fetch(lease.url), reader = response.body!.getReader();
         expect((await reader.read()).value).toEqual(new Uint8Array(data.subarray(0, 44)));
-        expect(archive.settings().savedCount).toBe(0); store.markPlayed(lease.id, 7); finish();
+        expect(archive.settings().savedCount).toBe(0); store.markPlayed(lease.id, 7); store.progress(lease.id, 7, 0.8); finish();
         while (!(await reader.read()).done) { /* Consume the rest of the same request. */ }
         await saved(archive); expect(fetchFn).toHaveBeenCalledTimes(1);
         expect(await archive.find(context, 7)).not.toBeNull(); expect(fetchFn).toHaveBeenCalledTimes(1);

@@ -2,11 +2,11 @@
 
 const fs = require('node:fs/promises');
 const { randomBytes } = require('node:crypto');
-const { responseRange, mergeRanges, archiveRelativePath, archiveKey } = require('./model.cjs');
+const { responseRange, isStrongEtag, mergeRanges, archiveRelativePath, archiveKey } = require('./model.cjs');
 const { childPath, hashFile, inspectAudio } = require('./files.cjs');
 
 // A bounded, asynchronous disk observer: playback never waits for disk writes or archive validation.
-const createCapture = (root, context, { log, onSaved, inspect = inspectAudio }) => {
+const createCapture = (root, context, { log, onSaved, onIdle = () => {}, inspect = inspectAudio }) => {
     let queue = Promise.resolve(), pendingBytes = 0, file = null, temporary = null;
     let played = false, retired = false, failed = false, finalized = false, total = null, validator = null;
     let ranges = [], transfers = 0;
@@ -33,6 +33,7 @@ const createCapture = (root, context, { log, onSaved, inspect = inspectAudio }) 
             await file.sync(); await file.close(); file = null;
             const type = await inspect(temporary, context.durationMs);
             const sha256 = await hashFile(temporary);
+            if (failed) return;
             const relative = archiveRelativePath(context, type.ext);
             const destination = await childPath(root, relative, true);
             // Never overwrite a file the listener or a different archive session already owns.
@@ -52,11 +53,13 @@ const createCapture = (root, context, { log, onSaved, inspect = inspectAudio }) 
     return {
         played: () => { played = true; schedule(finish); },
         retire: () => { retired = true; schedule(finish); },
+        cancel: () => { failed = true; retired = true; schedule(cleanup); },
+        snapshot: () => queue.then(() => ({ total, validator, transfers, failed, finalized, ranges: ranges.map(range => [...range]) })),
         response: response => {
             if (failed || finalized || retired) return null;
             const range = responseRange(response);
             if (!range) return null;
-            if (total !== null && (total !== range.total || !validator || validator !== range.etag || validator.startsWith('W/'))) {
+            if (total !== null && (total !== range.total || !isStrongEtag(validator) || validator !== range.etag)) {
                 failed = true; schedule(cleanup); return null;
             }
             total = range.total; validator = range.etag;
@@ -77,7 +80,7 @@ const createCapture = (root, context, { log, onSaved, inspect = inspectAudio }) 
                     }
                     const copy = Buffer.from(data);
                     pendingBytes += copy.length;
-                    schedule(async () => {
+                    return schedule(async () => {
                         try {
                             if (failed) return;
                             let written = 0;
@@ -93,9 +96,11 @@ const createCapture = (root, context, { log, onSaved, inspect = inspectAudio }) 
                     if (ended) return; ended = true;
                     schedule(async () => {
                         transfers--;
-                        if (!success || received !== range.end - range.start) failed = true;
-                        else ranges = mergeRanges(ranges, range.start, range.end);
+                        // A cancelled playback read still contributed version-validated bytes; only its missing tail needs fetching.
+                        if ((!success || received !== range.end - range.start) && !isStrongEtag(validator)) failed = true;
+                        if (received) ranges = mergeRanges(ranges, range.start, range.start + received);
                         await finish();
+                        if (!transfers) onIdle();
                     });
                 },
             };

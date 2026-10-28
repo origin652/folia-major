@@ -7,6 +7,7 @@ export interface PlaybackSourceBridge {
     stage(data: ArrayBuffer): Promise<{ id: string; filePath: string }>;
     stream?(url: string, context?: ArchiveContext): Promise<{ id: string; url: string }>;
     markPlayed?(id: string): Promise<void>;
+    progress?(id: string, seconds: number): Promise<void>;
     streamError?(id: string): Promise<string | null>;
     release(id: string): Promise<void>;
 }
@@ -16,6 +17,7 @@ export interface PreparedBackendSource {
     release(): Promise<void>;
     getError?(): Promise<string | null>;
     markPlayed?(): void;
+    progress?(seconds: number): void;
 }
 
 export const prepareBackendSource = async (url: string, sourceId: string, allowHttp: boolean, context?: ArchiveContext): Promise<PreparedBackendSource> => {
@@ -25,7 +27,7 @@ export const prepareBackendSource = async (url: string, sourceId: string, allowH
     if (allowHttp && !/^blob:/i.test(url)) {
         if (!bridge.stream) throw new Error('playback-stream-bridge-unavailable');
         const leased = context ? await bridge.stream(url, context) : await bridge.stream(url);
-        let played = false;
+        let played = false, retained = false;
         return {
             source: { sourceId, url: leased.url },
             release: () => bridge.release(leased.id),
@@ -34,6 +36,11 @@ export const prepareBackendSource = async (url: string, sourceId: string, allowH
                 if (played) return;
                 played = true;
                 void bridge.markPlayed?.(leased.id).catch(error => console.warn('[AudioArchive] Could not mark playing source', error));
+            },
+            progress: seconds => {
+                if (!played || retained || !context || !Number.isFinite(seconds) || seconds * 1000 < context.durationMs * 0.8) return;
+                retained = true;
+                void bridge.progress?.(leased.id, seconds).catch(error => console.warn('[AudioArchive] Could not retain playing source', error));
             },
         };
     }

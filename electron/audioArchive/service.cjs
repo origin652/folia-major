@@ -8,12 +8,12 @@ const path = require('node:path');
 const { parseRangeHeader } = require('../transcode/protocol.cjs');
 const { normalizeContext, archiveKey, MAX_AUDIO_BYTES } = require('./model.cjs');
 const { childPath, hashFile } = require('./files.cjs');
-const { createCapture } = require('./capture.cjs');
+const { createArchiveSession } = require('./session.cjs');
 
 // Host-owned archive settings, capture jobs and opaque local playback tickets; no provider credentials are stored.
 const ARCHIVE_SCHEME = 'folia-archive';
 const createAudioArchive = ({ readSettings, writeSettings, inspect, log = (...args) => console.warn('[AudioArchive]', ...args) }) => {
-    const tickets = new Map(), jobs = new Set();
+    const tickets = new Map(), jobs = new Map();
     let savedCount = 0, lastSaved = null;
     const settings = () => {
         const value = readSettings() || {};
@@ -26,25 +26,26 @@ const createAudioArchive = ({ readSettings, writeSettings, inspect, log = (...ar
         for (const name of ['enabled', 'preferLocal']) if (typeof patch?.[name] === 'boolean') next[name] = patch[name];
         if (next.enabled && !next.directory) throw new Error('Choose an archive directory first');
         writeSettings(next);
+        if (!next.enabled) for (const job of jobs.keys()) void job.cancel();
         return settings();
     };
     const choose = async directory => {
         const resolved = await fs.realpath(directory);
         if (!(await fs.stat(resolved)).isDirectory()) throw new Error('Archive root is not a directory');
+        for (const job of jobs.keys()) void job.cancel();
         writeSettings({ ...settings(), enabled: false, directory: resolved });
         return settings();
     };
-    const capture = value => {
+    const capture = (value, { url, fetchFn, ownerId } = {}) => {
         const config = settings(), context = normalizeContext(value);
         if (!config.enabled || !config.directory || !context || jobs.size >= 8) return null;
-        const job = createCapture(config.directory, context, { inspect, log, onSaved: saved => {
-            savedCount++; lastSaved = saved.title;
-            console.info('[AudioArchive] Complete audio archived', { songKey: saved.songKey, quality: saved.quality });
-        } });
-        jobs.add(job);
-        return { response: job.response, played: job.played, retire: () => {
-            job.retire(); void job.drain().finally(() => jobs.delete(job));
-        } };
+        const job = createArchiveSession({ root: config.directory, context, url, fetchFn, inspect, log,
+            onClosed: () => jobs.delete(job), onSaved: saved => {
+                savedCount++; lastSaved = saved.title;
+                console.info('[AudioArchive] Complete audio archived', { songKey: saved.songKey, quality: saved.quality });
+            } });
+        jobs.set(job, ownerId);
+        return job;
     };
     const find = async (query, ownerId) => {
         const config = settings();
@@ -96,8 +97,15 @@ const createAudioArchive = ({ readSettings, writeSettings, inspect, log = (...ar
             return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(file, range || undefined)), { status: range ? 206 : 200, headers });
         } catch { return new Response(null, { status: 404 }); }
     };
-    const releaseOwner = ownerId => { for (const [id, ticket] of tickets) if (ticket.ownerId === ownerId) tickets.delete(id); };
-    const dispose = async () => { tickets.clear(); for (const job of jobs) job.retire(); await Promise.all([...jobs].map(job => job.drain())); jobs.clear(); };
+    const releaseOwner = ownerId => {
+        for (const [id, ticket] of tickets) if (ticket.ownerId === ownerId) tickets.delete(id);
+        for (const [job, owner] of jobs) if (owner === ownerId) void job.cancel();
+    };
+    const dispose = async () => {
+        tickets.clear();
+        await Promise.all([...jobs.keys()].map(job => job.cancel()));
+        jobs.clear();
+    };
     return { settings, configure, choose, capture, find, response, releaseOwner, dispose };
 };
 

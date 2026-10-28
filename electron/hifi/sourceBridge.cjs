@@ -458,4 +458,5 @@ function createSourceBridge(options = {}) {
 module.exports = {
     createSourceBridge,
     parseRangeHeader,
+    redactRemoteError,
 };

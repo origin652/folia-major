@@ -4,7 +4,7 @@ export default {
   "audioArchive": {
     "title": "Played audio archive", "enabled": "Archive complete played audio", "directory": "Archive directory", "choose": "Choose folder",
     "chooseFirst": "Choose a separate archive folder first", "directoryHint": "Saved by provider / playlist / artist - title. Changing folders disables capture until re-enabled. Clearing the app cache does not delete archives.",
-    "description": "Off by default. Collects original bytes received through HTTP playback mods, saving only after playback starts and completeness and duration checks pass. No extra download or recompression. Search and mixed queues use Unsorted.",
+    "description": "Off by default. Archives verified original audio from HTTP playback mods. At 80% playback progress, missing bytes are completed in the background even after changing tracks. Reuses this session's saved bytes with the same strong ETag; no whole-track restart or recompression. Search and mixed queues use Unsorted.",
     "preferLocal": "Prefer local archived audio", "preferHint": "A verified archive matching source, song and quality avoids remote audio requests. Missing, damaged or different-quality files use normal source resolution. Lyrics may still use the network.",
     "status": "This session", "saved": "{{count}} tracks archived", "refresh": "Refresh status", "failed": "Archive action failed",
     "limits": "Capture currently supports HTTP playback mods; other outputs can play existing archives. Limit: 512 MiB per track. Previews, segmented protocols, unknown lengths and incomplete data are skipped. Manage archive space yourself and save only audio you are entitled to archive."

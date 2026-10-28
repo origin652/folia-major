@@ -4,8 +4,9 @@ const { createSourceBridge } = require('../hifi/sourceBridge.cjs');
 
 // Reuses the HiFi byte transport; provider authentication stays in Omni and Electron's media protocols.
 
-const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, logWarn, archive } = {}) => {
+const createPlaybackStreams = ({ fetchFn = (...args) => globalThis.fetch(...args), protocol, protocols = [], logInfo, logWarn, archive } = {}) => {
     const captures = new Map();
+    const owners = new Set();
     const allowed = new Set(['http:', 'https:', ...protocols]);
     const allowedProtocols = [...allowed];
     const bridge = createSourceBridge({ fetchFn, allowedRemoteProtocols: allowedProtocols,
@@ -38,8 +39,9 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         const extension = /\.(flac|wav|aiff?|mp3|m4a|mp4|ogg|opus|wv|dsf|dff|ape|caf)$/i.exec(parsed.pathname)?.[0]?.toLowerCase() ?? '';
         const { token, url: playbackUrl } = bridge.registerRemote({ url, fileName: `audio${extension}` });
         tickets.set(token, ownerId);
+        owners.add(ownerId);
         if (!parsed.protocol.startsWith('folia-')) {
-            const capture = archive?.capture(context);
+            const capture = archive?.capture(context, { url, fetchFn, ownerId });
             if (capture) captures.set(token, capture);
         }
         return { id: token, url: playbackUrl };
@@ -52,6 +54,8 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         bridge.revoke(id);
     };
     const releaseOwner = ownerId => {
+        archive?.releaseOwner(ownerId);
+        owners.delete(ownerId);
         generations.set(ownerId, (generations.get(ownerId) ?? 0) + 1);
         for (const [id, owner] of tickets) if (owner === ownerId) release(id, ownerId);
     };
@@ -60,13 +64,16 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         : 'SOURCE_UNREACHABLE';
     const dispose = async () => {
         disposed = true;
-        for (const capture of captures.values()) capture.retire();
+        for (const owner of owners) archive?.releaseOwner(owner);
+        owners.clear();
+        for (const capture of captures.values()) capture.cancel();
         captures.clear();
         tickets.clear();
         await bridge.stop();
     };
     const markPlayed = (id, ownerId) => { if (tickets.get(id) === ownerId) captures.get(id)?.played(); };
-    return { create, release, releaseOwner, getError, registerProtocol, dispose, markPlayed };
+    const progress = (id, ownerId, seconds) => { if (tickets.get(id) === ownerId) captures.get(id)?.progress(seconds); };
+    return { create, release, releaseOwner, getError, registerProtocol, dispose, markPlayed, progress };
 };
 
 module.exports = { createPlaybackStreams };

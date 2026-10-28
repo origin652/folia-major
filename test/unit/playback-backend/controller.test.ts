@@ -52,6 +52,20 @@ describe('backend registry', () => {
 });
 
 describe('backend controller', () => {
+    it('reports archive progress only for valid, current playing status, never a paused clock or EOF', async () => {
+        const b = mockBackend(), progress = vi.fn(), markPlayed = vi.fn();
+        const c = createBackendController(async (url, sourceId) => ({ source: { sourceId, url }, release: async () => {}, progress, markPlayed }));
+        await c.setBackend(b.definition); await c.open('https://test/current');
+        const sourceId = c.getStatus().sourceId;
+        b.report({ type: 'status', status: { sourceId, state: 'paused', position: 90, duration: 100 } });
+        b.report({ type: 'status', status: { sourceId: 'stale', state: 'playing', position: 90, duration: 100 } });
+        b.report({ type: 'status', status: { sourceId, state: 'playing', position: NaN, duration: 100 } });
+        expect(progress).not.toHaveBeenCalled();
+        b.report({ type: 'status', status: { sourceId, state: 'playing', position: 80, duration: 100 } });
+        expect(markPlayed).toHaveBeenCalledOnce(); expect(progress).toHaveBeenCalledExactlyOnceWith(80);
+        b.report({ type: 'ended', sourceId }); expect(progress).toHaveBeenCalledOnce();
+        await c.setBackend(null);
+    });
     it('turns a failed host stream into an error instead of advancing the queue', async () => {
         const b = mockBackend();
         const source = staged();

@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 
 // Archive identity is provider/song/actual quality, never an expiring media URL or a display name.
 const MAX_AUDIO_BYTES = 512 * 1024 * 1024;
+const isStrongEtag = value => typeof value === 'string' && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value);
 const cleanName = value => {
     let name = String(value).normalize('NFC').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 100).replace(/[. ]+$/, '');
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = `_${name}`;
@@ -51,8 +52,8 @@ const responseRange = response => {
         || total > MAX_AUDIO_BYTES || last - start + 1 !== length) return null;
     const etag = response.headers.get('etag');
     // Without a strong validator, only a single complete response may prove completeness.
-    if ((start !== 0 || last + 1 !== total) && (!etag || etag.startsWith('W/'))) return null;
+    if ((start !== 0 || last + 1 !== total) && !isStrongEtag(etag)) return null;
     return { start, end: last + 1, total, etag };
 };
 
-module.exports = { MAX_AUDIO_BYTES, cleanName, normalizeContext, archiveKey, archiveRelativePath, mergeRanges, responseRange };
+module.exports = { MAX_AUDIO_BYTES, isStrongEtag, cleanName, normalizeContext, archiveKey, archiveRelativePath, mergeRanges, responseRange };
