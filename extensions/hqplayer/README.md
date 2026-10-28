@@ -1,17 +1,23 @@
-# HQPlayer 独立播放模组（实验版 0.2.1）
+# HQPlayer 独立播放模组（实验版 0.2.3）
 
-仅使用主程序的 `playback.backends` 实验接口；不修改主程序、不依赖 Native Audio 模组，不捆绑或重新分发 HQPlayer。HQPlayer 负责解码、滤波、升频、调制和音频设备输出，Folia 负责曲目、播放队列和歌词时间轴。
+仅使用主程序的 `playback.backends` 实验接口；不修改主程序安装文件、不依赖 Native Audio 模组，不捆绑或重新分发 HQPlayer。0.2.3 的流式功能需要提供 `supportsStreams` 的新版宿主统一媒体桥；旧宿主仍使用完整文件暂存。HQPlayer 负责解码、滤波、升频、调制和音频设备输出，Folia 负责曲目、播放队列和歌词时间轴。
 
 ## 安装与使用
 
 1. 使用本仓库 `personal/playback-backends` 自维护分支构建的 Folia，它保留 `playback.backends` 接口；官方主线的 mpv 后端不等于具备该模组接口。原上游 PR #844 已关闭，本分支独立维护。
 2. 自行安装 HQPlayer Desktop，在 HQPlayer 中允许网络控制，关闭其 Settings 对话框。0.1.3 默认在选择此后端时自动启动尚未运行的 Windows Desktop，已运行则直接连接、不重复启动；仅启用模组不会启动。当前模组仅连接本机 `127.0.0.1:4321`，可自定义端口，不关闭 HQPlayer，不支持远程实例。
 3. 在 HQPlayer 配置实际输出设备，启用可变音量，并设足够低的最小音量（建议至少 -100 dB）。固定/旁路音量会被拒绝；模组不擅自修改这些设置。滤波、升频和输出模式可继续在 HQPlayer 配置，也可使用下述 DSP 草稿。
-4. Folia 设置 → 模组中导入 `hqplayer-0.2.1.zip`，确认权限并启用。执行“检查 HQPlayer 连接与注册状态”，结果会显示在命令卡和提示中，不展示注册人、指纹或注册码。这个诊断命令仍为只读，不自动启动程序。
+4. Folia 设置 → 模组中导入 `hqplayer-0.2.3.zip`，确认权限并启用。执行“检查 HQPlayer 连接与注册状态”，结果会显示在命令卡和提示中，不展示注册人、指纹或注册码。这个诊断命令仍为只读，不自动启动程序。
 5. Folia 设置 → 播放 → 播放后端，选择 `HQPlayer Desktop (local)`。选择只在本次 Folia 运行有效；启用模组不会自动接管输出。
 6. 默认要求 HQPlayer 已停止且当前曲目列表为空。若确需接管其他播放，先在 HQPlayer 自行保存列表，再在模组设置主动打开“允许替换 HQPlayer 已有播放列表”。模组会切换正在使用的 URI 传输，不提供自动恢复。
 
 修改连接设置会暂停并重新准备当前曲目，不自动恢复发声。DSP 草稿独立于连接设置，编辑草稿不会重建传输或发送设置命令。HQPlayer 的设备、独占、CUDA、多核等仍在 HQPlayer 设置，不再叠加 Native Audio 或宿主 DSP。
+
+## 0.2.2 后台心跳与手动恢复
+
+渲染窗口心跳中断超过 15 秒时，模组清理自己的输出，并通知宿主暂停和显示错误，不再让界面停留在“播放中”。心跳恢复不会自动发声；下一次明确按播放时，先等待旧输出清理成功，再重新准备保留的音源、恢复最后确认的位置并播放。超时后暂停、拖进度都不会重新启动输出；拖动的位置会用于下一次播放。清理失败时拒绝重新打开输出，需先确认 HQPlayer 已停止，再重新加载模组。
+
+桌面歌词、透明窗口及 Windows 壁纸切换的后端选择与进度交接由修订后的宿主负责：只保留用户明确选中的任意模组后端，旧输出清理完成后才重建窗口，恢复后保持暂停。仅升级本模组不能修复旧宿主的窗口交接遗漏。未选中 HQPlayer 时，不接管其他后端。
 
 ## 0.2.1 临时提前停止策略
 
@@ -52,9 +58,11 @@ Folia 的线性音量转换为 HQPlayer 的 dB 衰减。100% 不超过模组上�
 
 ## 输入与状态
 
-本地与 HTTP 音频都由宿主暂存原始字节，不经 Web Audio 解码。模组使用 `file-type` 识别容器，复制成带正确后缀的私有缓存文件，以本机原生绝对路径交给 HQPlayer；没有重编码，不将媒体发送到额外的 HTTP 服务，不打开额外监听端口。512 MiB 上限及宿主下载权限/URL 过期等限制仍然适用。未知容器、HQPlayer 不支持的编码、流式直播都会报错，不转换或回退浏览器。
+0.2.3 默认开启“通过 Folia 流式播放在线音频”，也能在“配置 HQPlayer 连接”命令中调整；开关在下次加载曲目时生效。新版宿主的统一鉴权媒体 bridge 把已解析的 HTTP(S) 或已登记媒体协议转成按需读取的本机随机令牌地址，模组直接用该地址调用 `PlayNextURI`，无需先等全曲下载。不访问 QQ、网易云、酷狗等平台的登录接口，不读取账号 Cookie，不接收原始签名播放 URL；各平台仍由宿主 Omni/provider 负责鉴权和音质。宿主不会给任意媒体 URL 附带登录 Cookie；需要专用鉴权的音源由宿主媒体协议处理。Range、HEAD、背压与取流故障在宿主处理，模组无额外监听端口，不重编码，不叠加 Web Audio。
 
-0.1.2 使用官方 `PlayNextURI(value=<本机路径>, freewheel=0)` 开始新曲目，暂停后用 `Play(last=0)` 恢复。不再调用 `PlaylistAdd`、`SetTransport` 或 `PlaylistClear`：本机实测旧的 `PlaylistAdd` 链路会导致 HQPlayer 退出，而 `PlayNextURI` 可以播放同一份 WAV。准备曲目不会调用 `PlayNextURI`；首次播放时才启动音频，并等待曲目数/播放状态就绪。准备期间的跳转暂存到实际加载后执行。
+关闭流式开关、使用旧宿主，或者读取完整缓存 Blob / 本地文件时，仍由宿主暂存原始字节；模组识别容器并复制为带正确后缀的私有文件交给 HQPlayer。此兼容路径仍有 512 MiB 上限。未知容器、HQPlayer 不支持的编码不会转换或回退浏览器。流式起播、拖动及恢复取决于上游服务、签名有效期、网络和 HQPlayer；直播、DRM 或所有平台/格式的真实兼容性未经验证。
+
+0.1.2 起使用官方 `PlayNextURI(value=<本机路径或宿主流地址>, freewheel=0)` 开始新曲目，暂停后用 `Play(last=0)` 恢复。不再调用 `PlaylistAdd`、`SetTransport` 或 `PlaylistClear`：本机实测旧的 `PlaylistAdd` 链路会导致 HQPlayer 退出，而 `PlayNextURI` 可以播放同一份 WAV。准备曲目不会调用 `PlayNextURI`；首次播放时才启动音频，并等待曲目数/播放状态就绪。准备期间的跳转暂存到实际加载后执行。
 
 周期查询状态最多 2 Hz，时钟使用协议的秒单位；seek 精度为官方接口的整数秒，命令确认后时钟可能稍后才更新。状态码依据官方 SDK：0 停止、1 暂停、2 播放、3 正在停止。URI 传输停止/结束时曲目数可能变为 0；这不等于被其他控制器接管。0.2.1 默认把已开始播放的本模组传输的明确停止当作结束；关闭临时兼容开关后，只有接近已知曲目结尾的停止才触发队列前进。
 
@@ -69,6 +77,8 @@ HQPlayer 的实际采样率、模式、位数和滤波器可通过检查命令�
 Windows 上 HQPlayer 报告停止后仍可能保留解码文件句柄。旧曲目的私有缓存等新 URI 加载后再删除；仅 `EBUSY` 文件占用会记录警告并延后清理，其他错误仍然报出。最后一个被占用的文件可能留在模组缓存中，可在 HQPlayer 关闭后清理缓存；不会为删除缓存强制退出 HQPlayer。
 
 ## 构建与验证
+
+0.2.3：262 项宿主 / 模组 / 更新 / 分层相关测试和类型检查通过；模拟慢速源验证首块在 EOF 前可读取，覆盖 Range、HEAD、令牌归属 / 撤销、错误阻止误跳歌、旧宿主完整暂存及日志脱敏。实际 ZIP 的 TCP 模拟器验证宿主流 URI、暂停 / seek、静音与连续五轮换曲。这里没有连接真实平台账号或控制用户正在运行的 HQPlayer，不等于所有平台、格式及真实 DAC 的流式播放已验证。
 
 断连错误会标出等待响应的命令名，不输出曲目 URI 或凭据；不会自动重试播放命令。0.1.1 仅补齐字段，真实测试仍在 `PlaylistAdd` 处失败，因此使用 0.1.2 的 URI 传输链路，不建议继续用旧包。
 
@@ -85,7 +95,7 @@ node test/manual/hqplayerSmoke.cjs
 node test/manual/hqplayerRealPackageSmoke.cjs --play-silence
 ```
 
-ZIP 写入 `release/hqplayer-0.2.1.zip`。主入口及其依赖打包成独立 CJS，客户端附带 `settings.mjs`、`dspSettings.mjs`、`displayClock.mjs`，不依赖 Folia 的私有 Node 模块；附全部运行库许可证。`package.mjs` 不下载或捆绑 HQPlayer，也不访问授权文件。
+ZIP 写入 `release/hqplayer-0.2.3.zip`。主入口及其依赖打包成独立 CJS，客户端附带 `settings.mjs`、`dspSettings.mjs`、`displayClock.mjs`，不依赖 Folia 的私有 Node 模块；附全部运行库许可证。`package.mjs` 不下载或捆绑 HQPlayer，也不访问授权文件。
 
 `hqplayerPackageSmoke.cjs` 将实际 ZIP 的主入口置于仅可加载 Node 内建模块的环境，并从 ZIP 加载客户端/字幕时钟/DSP 设置，用本地协议模拟器验证完整传输链、进度去重、异步暂停和 STOPREQ、五轮 EOF 切歌及明确应用 DSP 后保留进度，不连接用户的 HQPlayer。`hqplayerSmoke.cjs` 默认只读诊断；检测到固定音量时额外验证拒绝播放且没有发送播放、停止、音量或列表修改命令。只有手动加 `--play-silence`，且 HQPlayer 可变音量已开启、当前停止且列表为空，才会测试全零 PCM24 的 open/play/pause/seek；不会规避授权或试用限制。
 

@@ -12,7 +12,7 @@ const setup = () => {
     const events = new Map<string, (value: unknown) => void>();
     const api = {
         env: { context: 'main', locale: 'en' },
-        experimental: { 'playback.backends': { register: backend.mockReturnValue({ unregister: vi.fn() }) } },
+        experimental: { 'playback.backends': { supportsStreams: true, register: backend.mockReturnValue({ unregister: vi.fn() }) } },
         registries: {
             settingsSections: { register: vi.fn(() => ({ settings: {
                 get: () => ({ ...values }), set: (next: Record<string, unknown>) => { Object.assign(values, next); changed(); },
@@ -32,6 +32,18 @@ const setup = () => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('HQPlayer Folium client', () => {
+    it('ignores a lease expiry belonging to a retired source', async () => {
+        const { api, backend, events } = setup();
+        await activate(api);
+        const report = vi.fn();
+        const session = backend.mock.calls[0][0].create(report);
+        await session.open({ sourceId: 'current', filePath: '/test.audio' });
+        events.get('hqplayer.event')?.({ type: 'lease-expired', sourceId: 'old', position: 20, duration: 60 });
+        expect(report).not.toHaveBeenCalled();
+        await session.play();
+        expect(api.rpc.call.mock.calls.filter(([method]) => method === 'hqplayer.open')).toHaveLength(1);
+        await session.dispose();
+    });
     it('filters duplicate progress through the registered session without touching the playback service', async () => {
         let now = 0;
         vi.spyOn(performance, 'now').mockImplementation(() => now);
@@ -84,6 +96,7 @@ describe('HQPlayer Folium client', () => {
         expect(schema.find(field => field.key === 'autoStart')).toMatchObject({ type: 'boolean', defaultValue: true });
         expect(schema.find(field => field.key === 'executable')).toMatchObject({ type: 'text', defaultValue: '' });
         expect(schema.find(field => field.key === 'earlyStopAsEnded')).toMatchObject({ type: 'boolean', defaultValue: true });
+        expect(schema.find(field => field.key === 'streamHttp')).toMatchObject({ type: 'boolean', defaultValue: true });
     });
     it('ensures the player is running on backend selection without starting audio', async () => {
         const { api, backend } = setup();
@@ -97,11 +110,24 @@ describe('HQPlayer Folium client', () => {
         const { api, backend } = setup();
         await activate(api);
         expect(api.rpc.call).not.toHaveBeenCalled();
-        expect(backend.mock.calls[0][0].capabilities).toEqual({ seek: true, volume: true, http: false });
+        expect(backend.mock.calls[0][0].capabilities).toEqual({ seek: true, volume: true, http: true });
         const other = setup();
         other.api.env.context = 'export';
         await activate(other.api);
         expect(other.backend).not.toHaveBeenCalled();
+    });
+    it('chooses streaming per source load and keeps older hosts on file staging', async () => {
+        const s = setup();
+        await activate(s.api);
+        const capabilities = s.backend.mock.calls[0][0].capabilities;
+        expect(capabilities.http).toBe(true);
+        expect(s.commands.get('configure').params.find((field: any) => field.key === 'streamHttp')).toBeDefined();
+        s.values.streamHttp = false;
+        expect(capabilities.http).toBe(false);
+        s.values.streamHttp = true;
+        s.api.experimental['playback.backends'].supportsStreams = false;
+        expect(capabilities.http).toBe(false);
+        expect(s.api.rpc.call).not.toHaveBeenCalled();
     });
     it('shows read-only connection/license results and actionable fixed-volume feedback', async () => {
         const { api, commands } = setup();

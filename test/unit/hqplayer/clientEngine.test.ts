@@ -33,7 +33,7 @@ describe('HQPlayer host/client/engine integration', () => {
         const listeners = new Set<(event: any) => void>();
         const engine = createHqpEngine((event: any) => listeners.forEach(listener => listener(event)), '/isolated', {
             connect: () => connection, ensureRunning: async () => {}, pollMs: 50,
-            prepare: async () => ({ filePath: 'C:\\isolated\\test.wav', release: async () => {} }),
+            prepare: async () => ({ uri: 'C:\\isolated\\test.wav', release: async () => {} }),
         });
         let backend: any;
         await activate({

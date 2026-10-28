@@ -32,7 +32,7 @@ const setup = (overrides = {}, options = {}) => {
         }),
     };
     const release = vi.fn(async () => {});
-    const prepare = vi.fn(async () => ({ filePath: 'C:\\isolated\\audio.wav', release }));
+    const prepare = vi.fn(async () => ({ uri: 'C:\\isolated\\audio.wav', release }));
     const report = vi.fn();
     const engine = createHqpEngine(report, '/isolated', { connect: () => connection, prepare,
         ensureRunning: vi.fn(async () => {}), pollMs: 60000, ...options });

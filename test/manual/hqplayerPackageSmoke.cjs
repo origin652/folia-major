@@ -23,6 +23,7 @@ const run = async () => {
     entry._compile(strFromU8(zip['hqplayer/index.cjs']), 'hqplayer-standalone.cjs');
     let state = 0, position = 0, volume = -30, tracks = 0;
     let serial = 0;
+    let streamedUri = null;
     let stopping = 0, pausing = 0;
     const dsp = { mode: 0, filter: 0, filter1x: 0, filterNx: 0, shaper: 0, rate: 0 };
     const lists = {
@@ -53,8 +54,14 @@ const run = async () => {
                 if (name === 'PlayNextURI') {
                     assert.equal(request.getAttribute('freewheel'), '0');
                     tracks = 1; serial++; state = 2; position = 0;
-                    assert(path.isAbsolute(request.getAttribute('value')));
-                    assert.match(request.getAttribute('value'), /\.wav$/);
+                    const uri = request.getAttribute('value');
+                    if (uri.startsWith('http:')) {
+                        assert.match(uri, /^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{32}\/audio\.flac$/);
+                        streamedUri = uri;
+                    } else {
+                        assert(path.isAbsolute(uri));
+                        assert.match(uri, /\.wav$/);
+                    }
                 }
                 if (name === 'Play') { assert.equal(request.getAttribute('last'), '0'); state = 2; }
                 if (name === 'Pause') pausing = 2;
@@ -107,7 +114,7 @@ const run = async () => {
         const sections = new Map();
         await activate({
             env: { context: 'main', locale: 'en' },
-            experimental: { 'playback.backends': { register: definition => { backend = definition; return { unregister() {} }; } } },
+            experimental: { 'playback.backends': { supportsStreams: true, register: definition => { backend = definition; return { unregister() {} }; } } },
             rpc: { call: (name, ...args) => handlers.get(name)(...args),
                 on: (name, listener) => { listeners.set(name, listener); return () => listeners.delete(name); } },
             registries: {
@@ -167,6 +174,15 @@ const run = async () => {
                 await new Promise(resolve => setTimeout(resolve, 50));
             }
         }
+        assert.equal(backend.capabilities.http, true);
+        const hostUri = `http://127.0.0.1:12345/${'a'.repeat(32)}/audio.flac`;
+        await session.open({ sourceId: 'stream-check', url: hostUri });
+        await session.play();
+        assert.equal(streamedUri, hostUri, 'The standalone package must pass only the host lease to HQPlayer');
+        await session.pause();
+        await session.seek(4);
+        await session.play();
+        assert.equal(position, 4);
         await session.open({ sourceId: 'mute-check', filePath: file });
         await session.play();
         await session.setVolume(0);
@@ -177,7 +193,7 @@ const run = async () => {
         assert.equal(tracks, 0);
         assert(events.some(event => event.status?.sourceId === 'one' && event.status.state === 'playing'));
         assert(shown.some(event => event.status?.sourceId === 'one' && event.status.state === 'playing'));
-        console.log('[HQPlayerPackageSmoke] ZIP main + client + clock + DSP settings, TCP/XML, asynchronous Pause/STOPREQ, five EOF transitions including an early stop, explicit DSP apply, PCM24, seek, mute and disposal passed.');
+        console.log('[HQPlayerPackageSmoke] ZIP main + client + clock + DSP settings, TCP/XML, asynchronous Pause/STOPREQ, five EOF transitions including an early stop, host stream URI/pause/seek, explicit DSP apply, PCM24, mute and disposal passed.');
     } finally {
         try { if (session) await session.dispose(); }
         finally {

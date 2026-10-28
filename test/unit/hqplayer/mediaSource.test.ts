@@ -23,9 +23,9 @@ describe('HQPlayer source copies', () => {
         wav[44] = 255;
         await writeFile(original, wav);
         const prepared = await stageHqpSource({ sourceId: 'test', filePath: original }, path.join(root, 'cache'));
-        expect(prepared.filePath).toMatch(/\.wav$/);
-        expect(path.isAbsolute(prepared.filePath)).toBe(true);
-        const copy = prepared.filePath;
+        expect(prepared.uri).toMatch(/\.wav$/);
+        expect(path.isAbsolute(prepared.uri)).toBe(true);
+        const copy = prepared.uri;
         expect(await readFile(copy)).toEqual(wav);
         await prepared.release();
         await expect(stat(copy)).rejects.toThrow();
@@ -34,9 +34,23 @@ describe('HQPlayer source copies', () => {
     it('rejects remote/unrecognized sources rather than converting or falling back', async () => {
         const root = await mkdtemp(path.join(tmpdir(), 'folia-hqp-unit-'));
         roots.push(root);
-        await expect(stageHqpSource({ sourceId: 'x', url: 'https://example.test/a.flac' }, root)).rejects.toThrow('local file');
+        await expect(stageHqpSource({ sourceId: 'x', url: 'https://example.test/a.flac' }, root)).rejects.toThrow('loopback stream');
         const file = path.join(root, 'source.audio');
         await writeFile(file, Buffer.alloc(100));
         await expect(stageHqpSource({ sourceId: 'x', filePath: file }, root)).rejects.toThrow('Unrecognized');
+    });
+    it('uses only an opaque host lease without downloading or copying it', async () => {
+        const root = await mkdtemp(path.join(tmpdir(), 'folia-hqp-unit-'));
+        roots.push(root);
+        const cache = path.join(root, 'unused');
+        const url = `http://127.0.0.1:12345/${'a'.repeat(32)}/audio.flac`;
+        const prepared = await stageHqpSource({ sourceId: 'stream', url }, cache);
+        expect(prepared.uri).toBe(url);
+        await prepared.release();
+        await expect(stat(cache)).rejects.toThrow();
+        for (const uri of ['https://cdn.test/a.flac?vkey=secret', 'http://localhost:12345/a',
+            url.replace('127.0.0.1', 'example.test'), `${url}?token=secret`, 'file:///C:/song.flac']) {
+            await expect(stageHqpSource({ sourceId: 'x', url: uri }, cache)).rejects.toThrow('loopback stream');
+        }
     });
 });

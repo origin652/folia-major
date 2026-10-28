@@ -326,7 +326,7 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             if (loaded) await request('Play', { last: 0 });
             else {
                 // Match the working official --play-next-uri path; PlaylistAdd can terminate HQPlayer 6 here.
-                await request('PlayNextURI', { value: media.filePath, freewheel: 0 });
+                await request('PlayNextURI', { value: media.uri, freewheel: 0 });
                 loaded = true;
                 await waitForLoaded();
                 await releaseRetired();

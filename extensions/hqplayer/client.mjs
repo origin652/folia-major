@@ -23,8 +23,9 @@ export default async function activate(folium) {
     });
     const registration = backends.register({
         id: 'desktop', name: 'HQPlayer Desktop (local)',
-        // HTTP/custom URLs are fetched by the host and staged without browser decoding.
-        capabilities: { seek: true, volume: true, http: false },
+        // The host owns authentication and revocation; no provider API or credentials enter this mod.
+        capabilities: { seek: true, volume: true,
+            get http() { return backends.supportsStreams === true && section.settings.get().streamHttp !== false; } },
         create(report) {
             let work = Promise.resolve();
             let stopped = false;
@@ -32,6 +33,8 @@ export default async function activate(folium) {
             let source = null;
             let position = 0;
             let clockNeedsReset = false;
+            let needsReload = false;
+            let duration = 0;
             const clock = createHqpDisplayClock(report);
             const enqueue = action => {
                 const result = work.then(() => {
@@ -43,7 +46,23 @@ export default async function activate(folium) {
             };
             const off = folium.rpc.on('hqplayer.event', event => {
                 if (stopped) return;
-                if (event.type === 'status' && event.status.sourceId === source?.sourceId) position = event.status.position;
+                if (event.type === 'lease-expired') {
+                    if (event.sourceId !== source?.sourceId) return;
+                    needsReload = true;
+                    configured = false;
+                    position = event.position;
+                    duration = event.duration;
+                    clockNeedsReset = true;
+                    clock.setSource(source.sourceId);
+                    clock.receive({ type: 'status', status: { sourceId: source.sourceId, state: 'paused', position, duration } });
+                    clock.receive({ type: 'error', sourceId: source.sourceId, message: event.message });
+                    return;
+                }
+                if (needsReload) return;
+                if (event.type === 'status' && event.status.sourceId === source?.sourceId) {
+                    position = event.status.position;
+                    duration = event.status.duration;
+                }
                 if (event.type !== 'status' && event.sourceId === source?.sourceId) clockNeedsReset = true;
                 clock.receive(event);
             });
@@ -57,8 +76,10 @@ export default async function activate(folium) {
                 open: next => enqueue(async () => {
                     clock.setSource(next.sourceId);
                     clockNeedsReset = false;
-                    if (!configured) await configure(section.settings.get());
+                    needsReload = false;
                     source = next;
+                    position = duration = 0;
+                    if (!configured) await configure(section.settings.get());
                     await call('open', next);
                 }),
                 play: () => enqueue(async () => {
@@ -66,10 +87,29 @@ export default async function activate(folium) {
                         clock.setSource(source.sourceId);
                         clockNeedsReset = false;
                     }
+                    if (needsReload && source) {
+                        const resumeAt = position;
+                        try {
+                            await configure(section.settings.get());
+                            needsReload = false;
+                            await call('open', source);
+                            await seek(resumeAt);
+                        } catch (error) {
+                            needsReload = true;
+                            position = resumeAt;
+                            throw error;
+                        }
+                    }
                     await call('play');
                 }),
-                pause: () => enqueue(() => call('pause')),
-                seek: seconds => enqueue(() => seek(seconds)),
+                pause: () => enqueue(() => needsReload ? undefined : call('pause')),
+                seek: seconds => enqueue(() => {
+                    if (!needsReload) return seek(seconds);
+                    if (!Number.isFinite(seconds) || seconds < 0) throw new Error('Invalid HQPlayer seek');
+                    position = seconds;
+                    clock.setSource(source.sourceId);
+                    clock.receive({ type: 'status', status: { sourceId: source.sourceId, state: 'paused', position, duration } });
+                }),
                 setVolume: volume => enqueue(() => call('setVolume', volume)),
                 dispose: async () => {
                     stopped = true;
@@ -84,6 +124,7 @@ export default async function activate(folium) {
                     clock.setSource(source?.sourceId ?? '');
                     clockNeedsReset = false;
                     await configure(values);
+                    needsReload = false;
                     if (source) { await call('open', source); await seek(resumeAt); }
                 }),
             };

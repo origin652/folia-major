@@ -4,10 +4,19 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { fileTypeFromFile } = require('file-type/node');
 
-// HQPlayer needs a recognizable suffix; copy opaque host staging bytes without decoding or re-encoding.
+// Open only a host loopback lease or a recognized staged copy; never authenticate with a music provider here.
 
 const EXTENSIONS = new Set(['flac', 'wav', 'aif', 'aiff', 'mp3', 'm4a', 'mp4', 'ogg', 'opus', 'wv', 'dsf', 'dff', 'ape', 'caf']);
 const stageHqpSource = async (source, cache) => {
+    if (source?.sourceId && typeof source.url === 'string') {
+        let url;
+        try { url = new URL(source.url); } catch { url = null; }
+        if (!url || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port
+            || url.username || url.password || url.search || url.hash || !/^\/[a-f0-9]{32}\/audio(?:\.[a-z0-9]+)?$/.test(url.pathname)) {
+            throw new Error('HQPlayer requires a host-owned loopback stream; update Folia or turn off streaming and reload the track');
+        }
+        return { uri: source.url, release: async () => {} };
+    }
     if (!source?.sourceId || typeof source.filePath !== 'string' || !path.isAbsolute(source.filePath)) {
         throw new Error('HQPlayer requires a host-staged local file; remote HQPlayer servers are not supported');
     }
@@ -21,7 +30,7 @@ const stageHqpSource = async (source, cache) => {
     const release = () => fs.rm(directory, { recursive: true, force: true });
     try { await fs.copyFile(source.filePath, file, fs.constants.COPYFILE_EXCL); }
     catch (error) { await release(); throw error; }
-    return { filePath: file, release };
+    return { uri: file, release };
 };
 
 module.exports = { stageHqpSource };
