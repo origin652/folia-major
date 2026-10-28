@@ -10,6 +10,8 @@ import { Button, CopyValue, FoldedGroup, Group, Row, Select, Toggle, Value, useS
 import { useSettingsPage } from './settingsPageContext';
 import ConfigTransferRows from './storage/ConfigTransferRows';
 import FolderWatchGroup from './storage/FolderWatchGroup';
+import AudioArchiveGroup from './storage/AudioArchiveGroup';
+import { ARCHIVE_OPTIONS } from './storage/options';
 import { BACKUP, CACHE_ROWS, CACHES, MEDIA, O } from './storage/options';
 
 // src/components/modal/settings/pages/StoragePage.tsx
@@ -19,7 +21,7 @@ import { BACKUP, CACHE_ROWS, CACHES, MEDIA, O } from './storage/options';
 // folded group for copying and pasting the visual settings as a config code. The cache sizes and
 // the cache folder are the settings dialog's own state.
 
-export const OPTIONS: SettingsOptionDef[] = [...Object.values(O), ...CACHE_ROWS.map(row => row.option)];
+export const OPTIONS: SettingsOptionDef[] = [...Object.values(O), ...Object.values(ARCHIVE_OPTIONS), ...CACHE_ROWS.map(row => row.option)];
 
 // Zero is "no ceiling", which is a real answer rather than a missing one, so it gets a name.
 const CACHE_LIMITS_GB = [1, 2, 5, 10, 20, 50, 0];
@@ -108,6 +110,7 @@ const StoragePage: React.FC = () => {
             </Group>
 
             <FolderWatchGroup />
+            <AudioArchiveGroup />
 
             <FoldedGroup def={BACKUP}>
                 <ConfigTransferRows />

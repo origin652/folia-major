@@ -105,6 +105,8 @@ const { createGlobalShortcutController, usesGlobalShortcutsPortal } = require('.
 const { createTranscodeService } = require('./transcode/service.cjs');
 const { createPlaybackSourceStore } = require('./playbackBackends/sources.cjs');
 const { createPlaybackStreams } = require('./playbackBackends/streams.cjs');
+const { createAudioArchive, ARCHIVE_SCHEME } = require('./audioArchive/service.cjs');
+const { registerAudioArchiveIpc } = require('./audioArchive/ipc.cjs');
 const { registerPlaybackSourceIpc } = require('./playbackBackends/ipc.cjs');
 const { TRANSCODE_PROTOCOL_SCHEME } = require('./transcode/protocol.cjs');
 const { createMpvRuntime } = require('./hifi/mpvRuntime.cjs');
@@ -168,6 +170,7 @@ protocol.registerSchemesAsPrivileged([
     },
   },
   MOD_PROTOCOL_PRIVILEGED_SCHEME,
+  { scheme: ARCHIVE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   YTM_AUDIO_PRIVILEGED_SCHEME,
   SPOTIFY_AUDIO_PRIVILEGED_SCHEME,
 ]);
@@ -283,7 +286,12 @@ const transcodeService = createTranscodeService({
   onCacheWrite: pruneMediaCache,
 });
 const playbackSourceStore = createPlaybackSourceStore(path.join(app.getPath('userData'), 'playback-sources'));
+const audioArchive = createAudioArchive({
+  readSettings: () => store.get('audioArchive'),
+  writeSettings: value => store.set('audioArchive', value),
+});
 const playbackStreams = createPlaybackStreams({
+  archive: audioArchive,
   // Omni already resolved access; never attach the user's cookie jar to arbitrary media URLs.
   fetchFn: (url, options) => electronNet.fetch(url, { ...options, credentials: 'omit' }),
   protocol,
@@ -6049,6 +6057,7 @@ app.whenReady().then(async () => {
   setupCorsBypassHandlers();
   localCoverAssetStore.registerProtocolHandler(protocol, electronNet);
   playbackStreams.registerProtocol(YTM_AUDIO_SCHEME, request => ytmApiBridge.handleAudioRequest(request));
+  playbackStreams.registerProtocol(ARCHIVE_SCHEME, request => audioArchive.response(request));
   playbackStreams.registerProtocol(SPOTIFY_AUDIO_SCHEME, request => spotifyApiBridge.handleAudioRequest(request));
   // Transcode fallback is an optional degradation path; a failure preparing it must never keep
   // the rest of this handler, createWindow() included, from running.
@@ -6331,6 +6340,7 @@ app.on('before-quit', (event) => {
   transcodeService.dispose();
   void playbackSourceStore.dispose();
   void playbackStreams.dispose();
+  void audioArchive.dispose();
   hifiSession.killSync();
   // An mpv download the quit cuts off is stopped: its partial files go now if there is time, or
   // with the installer's sweep of leftovers next time.
@@ -6413,6 +6423,11 @@ app.on('before-quit', (event) => {
 registerPlaybackSourceIpc({
   ipcMain, files: playbackSourceStore, streams: playbackStreams,
   isTrusted: isTrustedMainWindowContents,
+});
+registerAudioArchiveIpc({
+  ipcMain, archive: audioArchive, dialog, getWindow: () => mainWindow,
+  isTrusted: isTrustedMainWindowContents,
+  forbiddenRoots: () => [app.getPath('userData'), app.getAppPath(), getConfiguredCacheDirectory()],
 });
 
 ipcMain.handle('window-set-native-theme', (event, themeSource) => {

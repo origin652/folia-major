@@ -30,6 +30,7 @@ import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
 import { onlineFailureOf } from './onlineMusic/failure/onlineFailureCase';
 import { noteOnlineRequestCooldown, onlineRequestCooldown } from './onlineMusic/failure/onlineRequestCooldown';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
+import { findArchivedSong } from './audioArchive/client';
 
 // Prefetch configuration
 //
@@ -237,6 +238,9 @@ export const resolvePrefetchAudioUrl = async (
     const sourceRef = getPlaybackSourceRef(song);
     const providerId = sourceRef.kind === 'online' ? sourceRef.providerId : undefined;
     try {
+        const archived = await findArchivedSong(song, audioQuality);
+        if (signal.aborted) return null;
+        if (archived) return { audioUrl: archived, replayGain: song.replayGain };
         // A copy fetched at another level than the one asked for does not count: playback will
         // pass it over, so the song gets a URL here like one with no copy.
         const audioExists = await hasCachedSongAudio(song, providerId ? omni.resolveAudioQuality(providerId, audioQuality) : undefined);

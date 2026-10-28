@@ -2,11 +2,12 @@ import { getPlaybackBackend, selectedPlaybackBackend, subscribePlaybackBackends 
 import { prepareBackendSource } from './source';
 import type { PlaybackBackendDefinition, PlaybackBackendEvent, PlaybackBackendSession, PlaybackBackendStatus } from './types';
 import { backendMediaShim } from '../hifi/hifiMediaShim';
+import type { ArchiveContext } from '../audioArchive/types';
 
 // Serializes transport intent around asynchronous opens; stale sessions cannot move the host clock.
 
 type PreparedSource = Awaited<ReturnType<typeof prepareBackendSource>>;
-type PrepareSource = (url: string, sourceId: string, allowHttp: boolean) => Promise<PreparedSource>;
+type PrepareSource = (url: string, sourceId: string, allowHttp: boolean, context?: ArchiveContext) => Promise<PreparedSource>;
 
 export const createBackendController = (prepare: PrepareSource = prepareBackendSource) => {
     const listeners = new Set<(event: PlaybackBackendEvent) => void>();
@@ -41,6 +42,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 || !Number.isFinite(event.status.duration) || event.status.duration < 0
                 || !['loading', 'playing', 'paused', 'stopped'].includes(event.status.state)) return;
             status = { ...event.status };
+            if (status.state === 'playing') prepared?.markPlayed?.();
             capturedAt = performance.now();
         } else {
             wantsPlay = false;
@@ -93,7 +95,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         await ready;
     };
 
-    const open = (url: string) => {
+    const open = (url: string, context?: ArchiveContext) => {
         if (url === sourceUrl && sourceId) return ready;
         const currentRevision = ++revision;
         const token = generation;
@@ -111,7 +113,8 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
             if (!session || !definition) throw new Error('playback-backend-unavailable');
             const active = session;
             await active.pause();
-            const next = await prepare(url, id, definition.capabilities.http);
+            const next = context ? await prepare(url, id, definition.capabilities.http, context)
+                : await prepare(url, id, definition.capabilities.http);
             if (token !== generation || currentRevision !== revision) { await release(next); return; }
             const previous = prepared;
             prepared = next;

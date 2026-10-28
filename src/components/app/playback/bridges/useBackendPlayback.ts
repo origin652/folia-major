@@ -11,6 +11,8 @@ import { isLocalPlaybackSong, isNavidromePlaybackSong } from '../../../../utils/
 import { bindPlaybackEngineReload, subscribePlaybackEngineSwitch } from '../../../../services/playbackBackend/selection';
 import { isPlaybackEngineSwitching } from '../../../../services/playbackBackend/registry';
 import type { HifiPlaySong } from '../../../hifi/hifiRouteTransport';
+import { usePlayingFromCollection } from '../../playing-song-locator/usePlayingFromCollection';
+import { archiveSourceContext } from '../../../../services/audioArchive/client';
 
 // UI half of the generic backend seam; the engine remains entirely outside the host.
 
@@ -26,6 +28,14 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
     const selected = useSyncExternalStore(subscribePlaybackBackends, selectedPlaybackBackend);
     const entry = useSyncExternalStore(subscribePlaybackBackends, getPlaybackBackend);
     const audioSrc = usePlaybackStore(state => state.audioSrc);
+    const song = usePlaybackStore(state => state.currentSong);
+    const collection = usePlayingFromCollection();
+    // Read fresh metadata at source load without reopening an engine when navigation metadata changes.
+    const archiveContext = useRef<ReturnType<typeof archiveSourceContext>>(undefined);
+    archiveContext.current = audioSrc ? archiveSourceContext(song, audioSrc, collection ? {
+        id: `${collection.source}:${'providerId' in collection ? collection.providerId : ''}:${collection.type}:${collection.id}`,
+        name: collection.name,
+    } : null) : undefined;
     const activeContext = usePlaybackStore(state => state.activePlaybackContext);
     const ended = useRef(onEnded);
     ended.current = onEnded;
@@ -98,7 +108,7 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
         }
         if (!entry) return;
         let cancelled = false;
-        void backendPlayback.open(audioSrc).then(async () => {
+        void backendPlayback.open(audioSrc, archiveContext.current).then(async () => {
             if (cancelled) return;
             const resumeAt = pendingResumeTimeRef.current;
             if (resumeAt !== null) {

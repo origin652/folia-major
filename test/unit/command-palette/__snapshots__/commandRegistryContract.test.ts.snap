@@ -132,6 +132,8 @@ exports[`command palette registry contract > keeps the registered command order 
   "export-lyric-cache",
   "export-current-lyrics-fia",
   "export-current-lyrics-lrc",
+  "settings-audio-archive",
+  "toggle-audio-archive",
   "settings-local-library-watch",
   "local-library-auto-scan-toggle",
   "settings-desktop",

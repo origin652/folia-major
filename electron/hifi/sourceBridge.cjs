@@ -109,6 +109,7 @@ function createSourceBridge(options = {}) {
         logWarn: writeWarn = (...args) => console.warn(...args),
         logPrefix = '[HiFi]',
         allowedRemoteProtocols = ['http:', 'https:'],
+        observeRemoteResponse,
         now = () => Date.now(),
         setTimeoutFn = (callback, ms) => setTimeout(callback, ms),
     } = options;
@@ -358,12 +359,20 @@ function createSourceBridge(options = {}) {
             return;
         }
         const body = Readable.fromWeb(upstream.body);
+        // Optional archive observers copy bounded chunks asynchronously; their failures must not interrupt playback.
+        let observer = null;
+        try { observer = observeRemoteResponse?.(token, upstream); }
+        catch (error) { logWarn('[HiFi] archive observer could not start', error); }
+        if (observer) body.on('data', chunk => {
+            try { observer.write(chunk); } catch { observer = null; }
+        });
         let upstreamError = null;
         // mpv 断开时 pipeline 也会让 body 报错，那时 connection 已经 closed，不算上游的错。
         body.once('error', error => {
             if (!connection.closed) upstreamError = error;
         });
         const pipeError = await new Promise(resolve => pipeline(body, res, error => resolve(error ?? null)));
+        try { observer?.end(!pipeError && res.writableFinished); } catch { /* Playback is independent of archiving. */ }
         if (upstreamError) {
             recordError(token, entry, 'SOURCE_UNREACHABLE');
             logWarn(`[HiFi] bridge ${label} stream from ${entry.host} broke off`, redactRemoteError(upstreamError, entry.url));

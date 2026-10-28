@@ -4,11 +4,13 @@ const { createSourceBridge } = require('../hifi/sourceBridge.cjs');
 
 // Reuses the HiFi byte transport; provider authentication stays in Omni and Electron's media protocols.
 
-const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, logWarn } = {}) => {
+const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, logWarn, archive } = {}) => {
+    const captures = new Map();
     const allowed = new Set(['http:', 'https:', ...protocols]);
     const allowedProtocols = [...allowed];
     const bridge = createSourceBridge({ fetchFn, allowedRemoteProtocols: allowedProtocols,
-        logPrefix: '[PlaybackBackend]', logInfo, logWarn });
+        logPrefix: '[PlaybackBackend]', logInfo, logWarn,
+        observeRemoteResponse: (token, response) => captures.get(token)?.response(response) });
     const tickets = new Map();
     const generations = new Map();
     let disposed = false;
@@ -18,7 +20,7 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         const name = `${scheme}:`;
         if (!allowed.has(name)) { allowed.add(name); allowedProtocols.push(name); }
     };
-    const create = async (url, ownerId) => {
+    const create = async (url, ownerId, context) => {
         if (disposed) throw new Error('playback-stream-retired');
         let parsed;
         try { parsed = typeof url === 'string' && url.length <= 16384 ? new URL(url) : null; }
@@ -36,11 +38,17 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         const extension = /\.(flac|wav|aiff?|mp3|m4a|mp4|ogg|opus|wv|dsf|dff|ape|caf)$/i.exec(parsed.pathname)?.[0]?.toLowerCase() ?? '';
         const { token, url: playbackUrl } = bridge.registerRemote({ url, fileName: `audio${extension}` });
         tickets.set(token, ownerId);
+        if (!parsed.protocol.startsWith('folia-')) {
+            const capture = archive?.capture(context);
+            if (capture) captures.set(token, capture);
+        }
         return { id: token, url: playbackUrl };
     };
     const release = (id, ownerId) => {
         if (tickets.get(id) !== ownerId) return;
         tickets.delete(id);
+        captures.get(id)?.retire();
+        captures.delete(id);
         bridge.revoke(id);
     };
     const releaseOwner = ownerId => {
@@ -52,10 +60,13 @@ const createPlaybackStreams = ({ fetchFn, protocol, protocols = [], logInfo, log
         : 'SOURCE_UNREACHABLE';
     const dispose = async () => {
         disposed = true;
+        for (const capture of captures.values()) capture.retire();
+        captures.clear();
         tickets.clear();
         await bridge.stop();
     };
-    return { create, release, releaseOwner, getError, registerProtocol, dispose };
+    const markPlayed = (id, ownerId) => { if (tickets.get(id) === ownerId) captures.get(id)?.played(); };
+    return { create, release, releaseOwner, getError, registerProtocol, dispose, markPlayed };
 };
 
 module.exports = { createPlaybackStreams };

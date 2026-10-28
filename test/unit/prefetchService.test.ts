@@ -38,6 +38,15 @@ const song: SongResult = {
 };
 
 describe('prefetched online ReplayGain metadata', () => {
+    it('does not ask for a remote URL when an exact-quality local archive is available', async () => {
+        mocks.getAudioSource.mockClear(); mocks.hasCachedSongAudio.mockClear();
+        const url = `folia-archive://audio/${'a'.repeat(32)}/audio.wav`;
+        vi.stubGlobal('window', { electron: { audioArchive: { find: vi.fn(async () => ({ url, quality: 'lossless' })) } } });
+        try {
+            expect(await resolvePrefetchAudioUrl(song, 'lossless', new AbortController().signal)).toEqual({ audioUrl: url, replayGain: undefined });
+            expect(mocks.getAudioSource).not.toHaveBeenCalled(); expect(mocks.hasCachedSongAudio).not.toHaveBeenCalled();
+        } finally { vi.unstubAllGlobals(); }
+    });
     beforeEach(() => clearPrefetchRuntime());
 
     it('keeps ReplayGain alongside a prefetched URL', () => {

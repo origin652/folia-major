@@ -1,6 +1,14 @@
 
 
 export default {
+  "audioArchive": {
+    "title": "已播放音频归档", "enabled": "自动归档完整音频", "directory": "归档目录", "choose": "选择文件夹",
+    "chooseFirst": "请先选择独立的归档文件夹", "directoryHint": "按平台 / 歌单 / 歌手 - 歌名保存。更换目录后需重新开启归档；清理应用缓存不会删除归档。",
+    "description": "默认关闭。收集 HTTP 模组播放时已收到的原始音频，实际开始播放且完整性与时长检查通过后保存。不额外下载，不重新压缩；搜索或混合队列归入 Unsorted。",
+    "preferLocal": "优先播放本地归档", "preferHint": "同一来源、歌曲和音质的归档校验通过后，不再请求远端音频。缺失、损坏或音质不匹配时照常取源；歌词等请求不受影响。",
+    "status": "本次运行", "saved": "已归档 {{count}} 首", "refresh": "刷新状态", "failed": "归档操作失败",
+    "limits": "当前收集 HTTP 模组链路，其他输出可播放已归档文件。单曲上限 512 MiB；试听、分段协议、未知长度和未收全的数据不归档。文件需由你自行管理，仅保存你有权归档的音源。"
+  },
   "libraryBravais": {
     "suiteName": "Bravais 墙面",
     "homeTitle": "书库",
@@ -773,6 +781,8 @@ export default {
       "settings-navidrome": { "title": "Navidrome 服务器", "description": "直接跳到 Navidrome 服务器连接设置" },
       "settings-stage-mode": { "title": "Stage 模式", "description": "直接跳到 Stage 外部播放器设置" },
       "settings-media-cache": { "title": "媒体缓存", "description": "直接跳到已下载音频的缓存" },
+      "settings-audio-archive": { "title": "音频归档", "description": "打开已播放音频的归档设置" },
+      "toggle-audio-archive": { "title": "切换音频归档", "description": "开启或关闭完整已播放音频的归档" },
       "filter-view": { "title": "筛选当前视图", "description": "按名称缩小屏幕上的卡片范围" },
       "panel-cover": { "title": "面板：封面", "description": "打开封面面板 tab" },
       "panel-controls": { "title": "面板：控制", "description": "打开控制面板 tab" },

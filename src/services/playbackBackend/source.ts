@@ -1,10 +1,12 @@
 import type { PlaybackBackendSource } from './types';
+import type { ArchiveContext } from '../audioArchive/types';
 
 // Prepare revocable host streams or opaque staged files without decoding in the browser.
 
 export interface PlaybackSourceBridge {
     stage(data: ArrayBuffer): Promise<{ id: string; filePath: string }>;
-    stream?(url: string): Promise<{ id: string; url: string }>;
+    stream?(url: string, context?: ArchiveContext): Promise<{ id: string; url: string }>;
+    markPlayed?(id: string): Promise<void>;
     streamError?(id: string): Promise<string | null>;
     release(id: string): Promise<void>;
 }
@@ -13,19 +15,26 @@ export interface PreparedBackendSource {
     source: PlaybackBackendSource;
     release(): Promise<void>;
     getError?(): Promise<string | null>;
+    markPlayed?(): void;
 }
 
-export const prepareBackendSource = async (url: string, sourceId: string, allowHttp: boolean): Promise<PreparedBackendSource> => {
+export const prepareBackendSource = async (url: string, sourceId: string, allowHttp: boolean, context?: ArchiveContext): Promise<PreparedBackendSource> => {
     if (!/^(blob:|https?:|folia-)/i.test(url)) throw new Error('unsupported-playback-source');
     const bridge = window.electron?.playbackSources;
     if (!bridge) throw new Error('playback-source-bridge-unavailable');
     if (allowHttp && !/^blob:/i.test(url)) {
         if (!bridge.stream) throw new Error('playback-stream-bridge-unavailable');
-        const leased = await bridge.stream(url);
+        const leased = context ? await bridge.stream(url, context) : await bridge.stream(url);
+        let played = false;
         return {
             source: { sourceId, url: leased.url },
             release: () => bridge.release(leased.id),
             getError: () => bridge.streamError?.(leased.id) ?? Promise.resolve(null),
+            markPlayed: () => {
+                if (played) return;
+                played = true;
+                void bridge.markPlayed?.(leased.id).catch(error => console.warn('[AudioArchive] Could not mark playing source', error));
+            },
         };
     }
     const response = await fetch(url);

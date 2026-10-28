@@ -8,6 +8,7 @@ import { createToggleCommand, createAppLanguageCommand, createSettingsCommand, c
 import { nowPlayingCardPositionCommand } from './nowPlayingCardPositionCommand';
 import { sleepTimerCommand } from './sleepTimerCommand';
 import { lyricExportCommands } from './lyricExportCommands';
+import { audioArchiveCommands } from './audioArchiveCommands';
 import { Gauge, Images, Layers3, Library } from 'lucide-react';
 import { latticePosterTintSurface } from '../surfaces/latticePosterTintSurface';
 import { gridViewCardsSurface } from '../surfaces/gridViewCardsSurface';
@@ -316,6 +317,7 @@ export const settingsCommands: CommandPaletteCommand[] = [
         },
     },
     ...lyricExportCommands,
+    ...audioArchiveCommands,
     createSettingsCommand(
         'settings-local-library-watch',
         'Local folder watch settings',

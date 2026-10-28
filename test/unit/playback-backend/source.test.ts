@@ -5,6 +5,17 @@ import { prepareBackendSource } from '../../../src/services/playbackBackend/sour
 afterEach(() => vi.unstubAllGlobals());
 
 describe('backend media preparation', () => {
+    it('passes archive context only to the host and marks a playing lease once, never on prepare', async () => {
+        const context = { songKey: 'online:test:1', quality: 'lossless', title: 'Title', artist: 'Artist', durationMs: 1000, preview: false as const, collection: null };
+        const bridge = { stream: vi.fn(async () => ({ id: 'ticket', url: 'http://127.0.0.1:1/audio' })), markPlayed: vi.fn(async () => {}), release: vi.fn(async () => {}) };
+        vi.stubGlobal('window', { electron: { playbackSources: bridge } });
+        const prepared = await prepareBackendSource('https://test/song.wav', 'source', true, context);
+        expect(bridge.stream).toHaveBeenCalledWith('https://test/song.wav', context);
+        expect(prepared.source).not.toHaveProperty('title'); expect(bridge.markPlayed).not.toHaveBeenCalled();
+        prepared.markPlayed?.(); prepared.markPlayed?.();
+        expect(bridge.markPlayed).toHaveBeenCalledOnce();
+        await prepared.release();
+    });
     it('leases an authenticated HTTP or host protocol without reading the response body', async () => {
         const url = `http://127.0.0.1:12345/${'b'.repeat(32)}/audio.flac`;
         const bridge = { stream: vi.fn(async () => ({ id: 'lease', url })),

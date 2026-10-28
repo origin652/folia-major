@@ -80,6 +80,21 @@ const song: SongResult = {
 };
 
 describe('online audio ReplayGain plumbing', () => {
+    it('uses a verified archive before cache or provider requests, but explicit recovery bypasses it', async () => {
+        vi.clearAllMocks(); cachedAudioMock.mockResolvedValue(null);
+        const url = `folia-archive://audio/${'a'.repeat(32)}/audio.wav`;
+        const find = vi.fn(async () => ({ url, quality: 'high' }));
+        vi.stubGlobal('window', { electron: { audioArchive: { find } } });
+        try {
+            expect(await loadOnlineSongAudioSource(song, 'high', null)).toMatchObject({ kind: 'ok', audioSrc: url });
+            expect(find).toHaveBeenCalledWith({ songKey: 'online:kugou:online-song', quality: 'high' });
+            expect(sourceMock).not.toHaveBeenCalled(); expect(cachedAudioMock).not.toHaveBeenCalled();
+            sourceMock.mockResolvedValueOnce({ url: 'https://audio.test/recovered.flac' });
+            expect(await loadOnlineSongAudioSource(song, 'high', { audioUrl: url, audioUrlFetchedAt: Date.now() } as any,
+                { bypassMediaCache: true })).toMatchObject({ audioSrc: 'https://audio.test/recovered.flac' });
+            expect(find).toHaveBeenCalledOnce(); expect(sourceMock).toHaveBeenCalledOnce();
+        } finally { vi.unstubAllGlobals(); }
+    });
     beforeEach(() => {
         vi.clearAllMocks();
         cachedAudioMock.mockResolvedValue(null);

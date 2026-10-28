@@ -1,6 +1,14 @@
 
 
 export default {
+  "audioArchive": {
+    "title": "Arsip audio yang diputar", "enabled": "Arsipkan audio lengkap", "directory": "Direktori arsip", "choose": "Pilih folder",
+    "chooseFirst": "Pilih folder arsip terpisah dahulu", "directoryHint": "Disimpan menurut penyedia / daftar putar / artis - judul. Ganti folder menonaktifkan pengarsipan. Pembersihan cache tidak menghapus arsip.",
+    "description": "Nonaktif secara bawaan. Simpan byte asli dari mod pemutaran HTTP setelah pemutaran dimulai serta pemeriksaan kelengkapan dan durasi lolos. Tanpa unduhan tambahan atau kompresi ulang. Pencarian dan antrean campuran memakai Unsorted.",
+    "preferLocal": "Utamakan arsip lokal", "preferHint": "Arsip terverifikasi dengan sumber, lagu, dan kualitas sama menghindari permintaan audio daring. File hilang, rusak, atau berbeda kualitas memakai sumber biasa. Lirik masih dapat memakai jaringan.",
+    "status": "Sesi ini", "saved": "{{count}} lagu diarsipkan", "refresh": "Segarkan status", "failed": "Tindakan arsip gagal",
+    "limits": "Pengarsipan saat ini mendukung mod HTTP; keluaran lain dapat memutar arsip. Batas 512 MiB per lagu. Pratinjau, protokol tersegmentasi, panjang tidak diketahui, dan data tidak lengkap dilewati. Kelola ruang sendiri dan simpan hanya audio yang berhak Anda arsipkan."
+  },
   "libraryBravais": {
     "suiteName": "Dinding Bravais",
     "homeTitle": "Pustaka",
@@ -773,6 +781,8 @@ export default {
       "settings-navidrome": { "title": "Server Navidrome", "description": "Langsung ke pengaturan koneksi server Navidrome" },
       "settings-stage-mode": { "title": "Mode Stage", "description": "Langsung ke pengaturan pemutar eksternal Stage" },
       "settings-media-cache": { "title": "Cache media", "description": "Langsung ke cache audio yang telah diunduh" },
+      "settings-audio-archive": { "title": "Arsip audio", "description": "Buka pengaturan arsip audio yang diputar" },
+      "toggle-audio-archive": { "title": "Alihkan pengarsipan audio", "description": "Aktifkan atau nonaktifkan arsip audio lengkap" },
       "filter-view": { "title": "Saring tampilan ini", "description": "Persempit kartu di layar berdasarkan nama" },
       "panel-cover": { "title": "Panel: sampul", "description": "Buka tab panel sampul" },
       "panel-controls": { "title": "Panel: kontrol", "description": "Buka tab panel kontrol" },

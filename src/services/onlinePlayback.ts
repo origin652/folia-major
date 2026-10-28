@@ -22,6 +22,7 @@ import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
 import { saveLyricCacheSongMetadata } from './lyricExport/lyricCacheMetadata';
 import { errorFields } from '../utils/errorText';
+import { findArchivedSong } from './audioArchive/client';
 
 // How long playback waits for a stored copy's header to give its play length (`wholeCopy`). Past
 // it the copy plays untested: the check must not hold up a song that starts from the cache.
@@ -54,6 +55,11 @@ export async function loadOnlineSongAudioSource(
     prefetched: PrefetchedSongData | null,
     options: LoadOnlineAudioSourceOptions = {},
 ): Promise<OnlineAudioSourceResult> {
+    if (!options.bypassMediaCache && !isCachedSongAudioDistrusted(song)) {
+        const archived = await findArchivedSong(song, audioQuality);
+        if (archived) return { kind: 'ok', audioSrc: archived,
+            replayGain: song.replayGain ?? prefetched?.replayGain ?? await getCachedSongReplayGain(song) };
+    }
     // The copy in the media cache is taken only where it was fetched at the level the option now
     // means for this song's provider, or at an unknown one. A copy of another level is passed
     // over for a URL of the level asked for: the option decides what plays, cached or not.
@@ -112,7 +118,7 @@ export async function loadOnlineSongAudioSource(
     const fromCopy = await playCopy(await readCopy(level));
     if (fromCopy) return fromCopy;
 
-    if (prefetched?.audioUrl && prefetched.audioUrl !== 'CACHED_IN_DB' && isUrlValid(prefetched.audioUrlFetchedAt)) {
+    if (prefetched?.audioUrl && prefetched.audioUrl !== 'CACHED_IN_DB' && !prefetched.audioUrl.startsWith('folia-archive:') && isUrlValid(prefetched.audioUrlFetchedAt)) {
         return {
             kind: 'ok',
             audioSrc: prefetched.audioUrl,

@@ -766,6 +766,7 @@ declare global {
   interface Window {
     electron?: {
       playbackSources?: import('./services/playbackBackend/source').PlaybackSourceBridge;
+      audioArchive?: import('./services/audioArchive/types').AudioArchiveBridge;
       webUtils?: {
         /** Resolves the OS path of a dropped File (File.path was removed in modern Electron). */
         getPathForFile: (file: File) => string;
