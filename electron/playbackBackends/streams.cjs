@@ -10,6 +10,7 @@ const createPlaybackStreams = ({ fetchFn = (...args) => globalThis.fetch(...args
     const owners = new Set();
     const allowed = new Set(['http:', 'https:', ...protocols]);
     const allowedProtocols = [...allowed];
+    const localProtocols = new Set();
     const health = createStreamHealth({ fetchFn });
     const bridge = createSourceBridge({ fetchFn, allowedRemoteProtocols: allowedProtocols,
         logPrefix: '[PlaybackBackend]', logInfo, logWarn,
@@ -21,10 +22,11 @@ const createPlaybackStreams = ({ fetchFn = (...args) => globalThis.fetch(...args
     const tickets = new Map();
     const generations = new Map();
     let disposed = false;
-    const registerProtocol = (scheme, handler) => {
+    const registerProtocol = (scheme, handler, { network = true } = {}) => {
         if (typeof scheme !== 'string' || !/^folia-[a-z][a-z0-9-]*$/.test(scheme)) throw new Error('invalid-media-protocol');
         protocol.handle(scheme, handler);
         const name = `${scheme}:`;
+        if (!network) localProtocols.add(name);
         if (!allowed.has(name)) { allowed.add(name); allowedProtocols.push(name); }
     };
     const create = async (url, ownerId, context) => {
@@ -45,13 +47,14 @@ const createPlaybackStreams = ({ fetchFn = (...args) => globalThis.fetch(...args
         const extension = /\.(flac|wav|aiff?|mp3|m4a|mp4|ogg|opus|wv|dsf|dff|ape|caf)$/i.exec(parsed.pathname)?.[0]?.toLowerCase() ?? '';
         const { token, url: playbackUrl } = bridge.registerRemote({ url, fileName: `audio${extension}` });
         tickets.set(token, ownerId);
-        health.add(token, url);
+        const network = !localProtocols.has(parsed.protocol);
+        if (network) health.add(token, url);
         owners.add(ownerId);
         if (!parsed.protocol.startsWith('folia-')) {
             const capture = archive?.capture(context, { url, fetchFn, ownerId });
             if (capture) captures.set(token, capture);
         }
-        return { id: token, url: playbackUrl };
+        return { id: token, url: playbackUrl, network };
     };
     const release = (id, ownerId) => {
         if (tickets.get(id) !== ownerId) return;

@@ -49,6 +49,18 @@ describe('authenticated playback stream leases', () => {
         expect(await (await fetch(lease.url)).text()).toBe('audio');
         expect(() => store.registerProtocol('file', handler)).toThrow('invalid-media');
     });
+    it('does not label local archive reads as network downloads or probe them', async () => {
+        const fetchFn = vi.fn(async () => new Response('audio', { headers: { 'Content-Type': 'audio/flac' } }));
+        const store = createPlaybackStreams({ fetchFn, protocol: { handle: vi.fn() }, logInfo: vi.fn(), logWarn: vi.fn() });
+        stores.push(store);
+        store.registerProtocol('folia-local', vi.fn(), { network: false });
+        const lease = await store.create('folia-local://audio/ticket', 7);
+        expect(lease.network).toBe(false);
+        expect(await (await fetch(lease.url)).text()).toBe('audio');
+        expect(store.transfer(lease.id, 7)).toBeNull();
+        expect(await store.probe(lease.id, 7)).toEqual({ ready: false, retryable: false });
+        expect(fetchFn).toHaveBeenCalledOnce();
+    });
     it('forwards Range and HEAD through the host without exposing upstream auth or downstream cookies', async () => {
         const fetchFn = vi.fn(async (_url: string, init: RequestInit) => new Response(init.method === 'HEAD' ? null : '3456', {
             status: 206, headers: { 'Content-Type': 'audio/flac', 'Content-Length': '4', 'Content-Range': 'bytes 3-6/10',

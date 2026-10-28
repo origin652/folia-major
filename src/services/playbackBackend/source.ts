@@ -6,7 +6,7 @@ import type { PlaybackTransfer } from '../../types/playbackTransfer';
 
 export interface PlaybackSourceBridge {
     stage(data: ArrayBuffer): Promise<{ id: string; filePath: string }>;
-    stream?(url: string, context?: ArchiveContext): Promise<{ id: string; url: string }>;
+    stream?(url: string, context?: ArchiveContext): Promise<{ id: string; url: string; network?: boolean }>;
     markPlayed?(id: string): Promise<void>;
     progress?(id: string, seconds: number): Promise<void>;
     streamError?(id: string): Promise<string | null>;
@@ -39,7 +39,7 @@ export const prepareBackendSource = async (url: string, sourceId: string, allowH
             source: { sourceId, url: leased.url },
             release: () => bridge.release(leased.id),
             getError: () => bridge.streamError?.(leased.id) ?? Promise.resolve(null),
-            ...(bridge.transfer && bridge.probe ? {
+            ...(leased.network !== false && bridge.transfer && bridge.probe ? {
                 getTransfer: () => bridge.transfer!(leased.id),
                 probe: () => bridge.probe!(leased.id),
                 cancelProbe: () => bridge.cancelProbe?.(leased.id) ?? Promise.resolve(),

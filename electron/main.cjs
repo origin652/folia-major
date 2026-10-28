@@ -6057,7 +6057,7 @@ app.whenReady().then(async () => {
   setupCorsBypassHandlers();
   localCoverAssetStore.registerProtocolHandler(protocol, electronNet);
   playbackStreams.registerProtocol(YTM_AUDIO_SCHEME, request => ytmApiBridge.handleAudioRequest(request));
-  playbackStreams.registerProtocol(ARCHIVE_SCHEME, request => audioArchive.response(request));
+  playbackStreams.registerProtocol(ARCHIVE_SCHEME, request => audioArchive.response(request), { network: false });
   playbackStreams.registerProtocol(SPOTIFY_AUDIO_SCHEME, request => spotifyApiBridge.handleAudioRequest(request));
   // Transcode fallback is an optional degradation path; a failure preparing it must never keep
   // the rest of this handler, createWindow() included, from running.
