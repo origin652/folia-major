@@ -14,6 +14,28 @@ const setup = (fetchFn: any, protocols: string[] = []) => {
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.dispose())); });
 
 describe('authenticated playback stream leases', () => {
+    it('isolates health/probes by owner and clears stale failures only after a successful probe', async () => {
+        let status = 503;
+        const fetchFn = vi.fn(async () => new Response('audio', { status,
+            headers: { 'Content-Type': status >= 400 ? 'text/html' : 'audio/flac' } }));
+        const { store } = setup(fetchFn);
+        const lease = await store.create('https://cdn.test/song.flac?token=private', 7);
+        expect(store.transfer(lease.id, 8)).toBeNull();
+        expect(await store.probe(lease.id, 8)).toEqual({ ready: false, retryable: false });
+        expect(fetchFn).not.toHaveBeenCalled();
+        await fetch(lease.url);
+        expect(store.transfer(lease.id, 7).failure.retryable).toBe(true);
+        status = 403;
+        await fetch(lease.url);
+        expect(store.transfer(lease.id, 7).failure.retryable).toBe(false);
+        status = 200;
+        expect(await store.probe(lease.id, 7)).toEqual({ ready: true, retryable: true });
+        expect(store.transfer(lease.id, 7).failure).toBeNull();
+        expect(store.getError(lease.id, 7)).toBeNull();
+        expect(fetchFn.mock.calls.every((call: any[]) => call[1].credentials === 'omit')).toBe(true);
+        store.releaseOwner(7);
+        expect(store.transfer(lease.id, 7)).toBeNull();
+    });
     it('adds a host media protocol only after its handler has been registered', async () => {
         const handle = vi.fn();
         const fetchFn = vi.fn(async () => new Response('audio', { headers: { 'Content-Type': 'audio/flac' } }));

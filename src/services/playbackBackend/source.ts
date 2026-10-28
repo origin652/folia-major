@@ -1,5 +1,6 @@
 import type { PlaybackBackendSource } from './types';
 import type { ArchiveContext } from '../audioArchive/types';
+import type { PlaybackTransfer } from '../../types/playbackTransfer';
 
 // Prepare revocable host streams or opaque staged files without decoding in the browser.
 
@@ -9,6 +10,9 @@ export interface PlaybackSourceBridge {
     markPlayed?(id: string): Promise<void>;
     progress?(id: string, seconds: number): Promise<void>;
     streamError?(id: string): Promise<string | null>;
+    transfer?(id: string): Promise<PlaybackTransfer | null>;
+    probe?(id: string): Promise<{ ready: boolean; retryable: boolean }>;
+    cancelProbe?(id: string): Promise<void>;
     release(id: string): Promise<void>;
 }
 
@@ -16,6 +20,9 @@ export interface PreparedBackendSource {
     source: PlaybackBackendSource;
     release(): Promise<void>;
     getError?(): Promise<string | null>;
+    getTransfer?(): Promise<PlaybackTransfer | null>;
+    probe?(): Promise<{ ready: boolean; retryable: boolean }>;
+    cancelProbe?(): Promise<void>;
     markPlayed?(): void;
     progress?(seconds: number): void;
 }
@@ -32,6 +39,11 @@ export const prepareBackendSource = async (url: string, sourceId: string, allowH
             source: { sourceId, url: leased.url },
             release: () => bridge.release(leased.id),
             getError: () => bridge.streamError?.(leased.id) ?? Promise.resolve(null),
+            ...(bridge.transfer && bridge.probe ? {
+                getTransfer: () => bridge.transfer!(leased.id),
+                probe: () => bridge.probe!(leased.id),
+                cancelProbe: () => bridge.cancelProbe?.(leased.id) ?? Promise.resolve(),
+            } : {}),
             markPlayed: () => {
                 if (played) return;
                 played = true;

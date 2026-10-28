@@ -682,6 +682,28 @@
   transition: transform 240ms var(--remote-snap);
 }
 
+/* Reuse the time slot; it remains visible when transport keys fade away. */
+.remote-transfer {
+  position: absolute;
+  top: 145px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 12px;
+  color: rgba(var(--remote-ink), 0.78);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.remote-transfer__spinner { animation: remote-transfer-turn 1s linear infinite; }
+@keyframes remote-transfer-turn { to { transform: rotate(360deg); } }
+.remote-window[data-transfer='true'] :is(.remote-deck__slot--time, .remote-preview--prev) {
+  visibility: hidden;
+}
+
 /* When idle the line lies along the bottom edge, where the keys were. */
 .remote-window[data-idle='true'] .remote-line {
   transform: translateY(34px);

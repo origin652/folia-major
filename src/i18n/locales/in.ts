@@ -4452,6 +4452,8 @@ export default {
     }
   },
   "remote": {
+    "buffering": "Menyangga",
+    "audioDownloadSpeed": "Kecepatan unduh audio",
     "backgroundDefault": "Latar Belakang Bawaan",
     "backgroundCover": "Warna Sampul",
     "backgroundTransparent": "Transparan",

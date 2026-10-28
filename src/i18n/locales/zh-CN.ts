@@ -4452,6 +4452,8 @@ export default {
     }
   },
   "remote": {
+    "buffering": "缓冲中",
+    "audioDownloadSpeed": "音频下载速度",
     "backgroundDefault": "默认背景",
     "backgroundCover": "封面色彩",
     "backgroundTransparent": "透明背景",

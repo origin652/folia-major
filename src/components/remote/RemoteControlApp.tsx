@@ -6,6 +6,7 @@ import { idleVideoExportState } from '../../types/videoExport';
 import { useReducedMotionFor } from '../../hooks/useReducedMotionFor';
 import { isRemoteExportBusy } from './RemoteExportTab';
 import RemoteKeyRow from './RemoteKeyRow';
+import { RemoteTransferStatus } from './RemoteTransferStatus';
 import RemoteLyricBlock from './RemoteLyricBlock';
 import RemoteProgressLine from './RemoteProgressLine';
 import RemoteSheet from './RemoteSheet';
@@ -142,6 +143,7 @@ const RemoteControlApp: React.FC = () => {
             data-sleeve={isSleeve}
             data-paused={snapshot.hasTrack && !isPlaying}
             data-sheet={sheet.isOpen}
+            data-transfer={Boolean(snapshot.audioTransfer?.buffering || (snapshot.audioTransfer?.bytesPerSecond ?? 0) > 0)}
             data-notitle={presentation.hideTitlebar || isDisplayOnly}
             onFocus={event => setHasKeyboardFocus(event.target.matches(':focus-visible'))}
             onBlur={() => setHasKeyboardFocus(false)}
@@ -209,6 +211,7 @@ const RemoteControlApp: React.FC = () => {
                         onSeek={time => sendRemoteCommand({ type: 'seek', time })}
                     />
 
+                    {snapshot.hasTrack && !sheet.isOpen && <RemoteTransferStatus transfer={snapshot.audioTransfer} />}
                     {!isDisplayOnly && (
                         <RemoteKeyRow
                             snapshot={snapshot}

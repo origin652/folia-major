@@ -81,7 +81,7 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
             if (store.duration !== status.duration) store.setDuration(status.duration);
             currentTime.set(status.position);
             if (status.state === 'playing') setPlayerState(PlayerState.PLAYING);
-            if (status.state === 'paused' || status.state === 'stopped') setPlayerState(PlayerState.PAUSED);
+            if (status.state !== 'playing') setPlayerState(PlayerState.PAUSED);
         } else if (event.type === 'ended') {
             if (repeat.current === 'one') {
                 void backendPlayback.seek(0).then(() => backendPlayback.play()).catch(error => {

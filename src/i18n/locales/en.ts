@@ -4452,6 +4452,8 @@ export default {
     }
   },
   "remote": {
+    "buffering": "Buffering",
+    "audioDownloadSpeed": "Audio download speed",
     "backgroundDefault": "Default Background",
     "backgroundCover": "Cover Colors",
     "backgroundTransparent": "Transparent",

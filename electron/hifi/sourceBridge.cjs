@@ -4,6 +4,7 @@ const { randomBytes: cryptoRandomBytes } = require('crypto');
 const { Readable, pipeline } = require('stream');
 const { inspect } = require('util');
 const { createHifiError, sanitizeDetail } = require('./hifiErrors.cjs');
+const { networkFailure, retryableStatus } = require('./networkFailure.cjs');
 
 // 只听 127.0.0.1 的来源桥：mpv 凭随机令牌取音频，本地 File 按块向渲染端要，Navidrome 由主进程 fetch 后转给 mpv。
 
@@ -110,6 +111,8 @@ function createSourceBridge(options = {}) {
         logPrefix = '[HiFi]',
         allowedRemoteProtocols = ['http:', 'https:'],
         observeRemoteResponse,
+        onRemoteFailure,
+        onRemoteComplete,
         now = () => Date.now(),
         setTimeoutFn = (callback, ms) => setTimeout(callback, ms),
     } = options;
@@ -194,13 +197,15 @@ function createSourceBridge(options = {}) {
     const getSourceError = token => sourceErrors.get(token) ?? null;
 
     // 令牌还登记着时才记错：撤销后的断流是我们自己断的，不算源的错。
-    const recordError = (token, entry, code) => {
+    const recordError = (token, entry, code, retryable = false) => {
         if (sources.get(token) === entry && !sourceErrors.has(token)) sourceErrors.set(token, code);
+        if (sources.get(token) === entry && entry.kind === 'remote') onRemoteFailure?.(token, { code, retryable });
     };
 
     // 同一个令牌后来有一次请求把它要的范围完整送到了（mpv 重连成功）：之前记的错作废，
     // 免得会话把一次已经恢复的断流当成这首歌放完时、或之后不相干的出错时的原因。
     const clearError = (token, entry) => {
+        if (sources.get(token) === entry && entry.kind === 'remote') onRemoteComplete?.(token);
         if (sources.get(token) === entry && sourceErrors.delete(token)) {
             logInfo(`[HiFi] bridge ${tokenLabel(token)} served a full request again, dropping the earlier error`);
         }
@@ -317,10 +322,10 @@ function createSourceBridge(options = {}) {
         if (typeof req.headers.range === 'string') headers.Range = req.headers.range;
         let upstream;
         try {
-            upstream = await fetchFn(entry.url, { method: req.method, headers, redirect: 'follow', signal: controller.signal });
+            upstream = await fetchFn(entry.url, { method: req.method, headers, redirect: 'follow', credentials: 'omit', signal: controller.signal });
         } catch (error) {
             if (connection.closed) return;
-            recordError(token, entry, 'SOURCE_UNREACHABLE');
+            recordError(token, entry, 'SOURCE_UNREACHABLE', networkFailure(error));
             logWarn(`[HiFi] bridge ${label} fetch from ${entry.host} failed`, redactRemoteError(error, entry.url));
             sendEmpty(res, 502);
             return;
@@ -330,18 +335,18 @@ function createSourceBridge(options = {}) {
             return;
         }
         const contentType = upstream.headers.get('content-type') || '';
+        if (upstream.status >= 400) {
+            cancelBody(upstream);
+            recordError(token, entry, 'SOURCE_UNREACHABLE', retryableStatus(upstream.status));
+            logWarn(`[HiFi] bridge ${label} ${entry.host} answered ${upstream.status}`);
+            sendEmpty(res, upstream.status);
+            return;
+        }
         if (REJECTED_CONTENT_TYPE.test(contentType)) {
             cancelBody(upstream);
             recordError(token, entry, 'SOURCE_REJECTED');
             logWarn(`[HiFi] bridge ${label} ${entry.host} answered ${upstream.status} with ${contentType}, not audio`);
             sendEmpty(res, 502);
-            return;
-        }
-        if (upstream.status >= 400) {
-            cancelBody(upstream);
-            recordError(token, entry, 'SOURCE_UNREACHABLE');
-            logWarn(`[HiFi] bridge ${label} ${entry.host} answered ${upstream.status}`);
-            sendEmpty(res, upstream.status);
             return;
         }
         const forwarded = {};
@@ -374,7 +379,7 @@ function createSourceBridge(options = {}) {
         const pipeError = await new Promise(resolve => pipeline(body, res, error => resolve(error ?? null)));
         try { observer?.end(!pipeError && res.writableFinished); } catch { /* Playback is independent of archiving. */ }
         if (upstreamError) {
-            recordError(token, entry, 'SOURCE_UNREACHABLE');
+            recordError(token, entry, 'SOURCE_UNREACHABLE', networkFailure(upstreamError));
             logWarn(`[HiFi] bridge ${label} stream from ${entry.host} broke off`, redactRemoteError(upstreamError, entry.url));
             return;
         }
@@ -452,6 +457,7 @@ function createSourceBridge(options = {}) {
         revoke,
         revokeAll,
         getSourceError,
+        clearSourceError: token => { const entry = sources.get(token); if (entry) clearError(token, entry); },
     };
 }
 

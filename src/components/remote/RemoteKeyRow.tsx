@@ -89,7 +89,7 @@ const RemoteKeyRow: React.FC<RemoteKeyRowProps> = ({
         setRestSide(null);
     };
 
-    const isPlaying = snapshot.playerState === PlayerState.PLAYING;
+    const isPlaying = snapshot.playerState === PlayerState.PLAYING || Boolean(snapshot.audioTransfer?.buffering);
     const LoopIcon = loopModeIcon(snapshot.loopMode);
     const likeUnavailableReason = snapshot.likeUnavailableProvider
         ? t('status.providerLikeUnavailable', { provider: snapshot.likeUnavailableProvider })

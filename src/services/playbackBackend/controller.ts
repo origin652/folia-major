@@ -3,6 +3,7 @@ import { prepareBackendSource } from './source';
 import type { PlaybackBackendDefinition, PlaybackBackendEvent, PlaybackBackendSession, PlaybackBackendStatus } from './types';
 import { backendMediaShim } from '../hifi/hifiMediaShim';
 import type { ArchiveContext } from '../audioArchive/types';
+import { createNetworkRecovery } from './networkRecovery';
 
 // Serializes transport intent around asynchronous opens; stale sessions cannot move the host clock.
 
@@ -24,6 +25,46 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     let retired: { session: PlaybackBackendSession; source: PreparedSource | null } | null = null;
     let status: PlaybackBackendStatus = { sourceId, state: 'stopped', position: 0, duration: 0 };
     let capturedAt = performance.now();
+    let resumeStatus = status;
+    const recovery = createNetworkRecovery({
+        canSeek: () => Boolean(definition?.capabilities.seek),
+        wantsPlay: () => wantsPlay,
+        waiting: () => {
+            status = { ...resumeStatus, state: 'loading' };
+            capturedAt = performance.now();
+            notify({ type: 'status', status });
+        },
+        restore: current => {
+            const active = session, source = prepared, position = status.position;
+            const previousReady = ready;
+            ready = (async () => {
+                await previousReady.catch(() => {});
+                const valid = () => current() && active === session && source === prepared;
+                if (!valid() || !active || !source) return;
+                await active.pause();
+                if (!valid()) return;
+                recovery.checkRestore();
+                // A reopened transport gets a new identity: late reports from the interrupted one cannot rewind it.
+                sourceId = `source-${generation}-${++revision}`;
+                resumeStatus = status = { ...status, sourceId };
+                await active.open({ ...source.source, sourceId });
+                if (!valid()) return;
+                recovery.checkRestore();
+                await active.seek(position);
+                if (!valid()) return;
+                recovery.checkRestore();
+                if (definition?.capabilities.volume) await active.setVolume(volume);
+                if (!valid()) return;
+                recovery.checkRestore();
+                await active.play();
+                if (!valid()) { if (active === session && !wantsPlay) await active.pause(); return; }
+                recovery.checkRestore();
+                deliver({ type: 'status', status: { ...status, state: 'playing', position } }, generation);
+            })();
+            return ready;
+        },
+        failed: message => deliver({ type: 'error', sourceId, message }, generation),
+    });
 
     const notify = (event: PlaybackBackendEvent) => listeners.forEach(listener => {
         try { listener(event); }
@@ -42,6 +83,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 || !Number.isFinite(event.status.duration) || event.status.duration < 0
                 || !['loading', 'playing', 'paused', 'stopped'].includes(event.status.state)) return;
             status = { ...event.status };
+            if (status.state === 'playing' || status.state === 'paused') resumeStatus = status;
             if (status.state === 'playing') {
                 prepared?.markPlayed?.();
                 prepared?.progress?.(status.position);
@@ -58,14 +100,23 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     const report = (event: PlaybackBackendEvent, token: number) => {
         if (token !== generation) return;
         if ((event.type === 'status' ? event.status?.sourceId : event.sourceId) !== sourceId) return;
+        if (recovery.pending()) {
+            if (event.type === 'error') recovery.captureError(event.message);
+            return;
+        }
         // An interrupted authenticated stream is not EOF, even if a backend treats early stops as ended.
         const source = prepared;
-        if (event.type !== 'ended' || !source?.getError) { deliver(event, token); return; }
-        void source.getError().then(code => {
+        if (!source || event.type === 'status' && (event.status.state !== 'stopped' || !source.getTransfer)
+            || event.type === 'error' && !source.getTransfer
+            || event.type === 'ended' && !source.getError && !source.getTransfer) { deliver(event, token); return; }
+        const eventSourceId = event.type === 'status' ? event.status.sourceId : event.sourceId;
+        void recovery.recover().then(async recovered => {
+            if (prepared !== source || recovered) return;
+            const code = event.type === 'ended' ? await source.getError?.() : null;
             if (prepared !== source) return;
-            deliver(code ? { type: 'error', sourceId: event.sourceId, message: `Playback stream failed (${code})` } : event, token);
+            deliver(code ? { type: 'error', sourceId: eventSourceId, message: `Playback stream failed (${code})` } : event, token);
         }).catch(() => {
-            if (prepared === source) deliver({ type: 'error', sourceId: event.sourceId, message: 'Playback stream status unavailable' }, token);
+            if (prepared === source) deliver({ type: 'error', sourceId: eventSourceId, message: 'Playback stream status unavailable' }, token);
         });
     };
 
@@ -73,6 +124,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         if (definition === next && !force && !retired) return ready;
         const token = ++generation;
         revision++;
+        recovery.attach(null);
         wantsPlay = false;
         const previous = session;
         const previousSource = prepared;
@@ -83,6 +135,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         sourceId = '';
         sourceUrl = '';
         status = { sourceId: '', state: 'stopped', position: 0, duration: 0 };
+        resumeStatus = status;
         notify({ type: 'status', status });
         const previousReady = ready;
         ready = (async () => {
@@ -101,12 +154,14 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     const open = (url: string, context?: ArchiveContext) => {
         if (url === sourceUrl && sourceId) return ready;
         const currentRevision = ++revision;
+        recovery.attach(null);
         const token = generation;
         wantsPlay = false;
         sourceUrl = url;
         sourceId = `source-${token}-${currentRevision}`;
         const id = sourceId;
         status = { sourceId: id, state: 'loading', position: 0, duration: 0 };
+        resumeStatus = status;
         capturedAt = performance.now();
         notify({ type: 'status', status });
         const previousReady = ready;
@@ -121,11 +176,14 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
             if (token !== generation || currentRevision !== revision) { await release(next); return; }
             const previous = prepared;
             prepared = next;
+            recovery.attach(next);
             try {
                 await active.open(next.source);
                 if (token === generation && currentRevision === revision && definition?.capabilities.volume) await active.setVolume(volume);
             } catch (error) {
+                if (token === generation && currentRevision === revision && await recovery.recover()) return;
                 if (prepared === next) prepared = null;
+                recovery.attach(null);
                 await release(next);
                 throw error;
             } finally { await release(previous); }
@@ -144,16 +202,27 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         wantsPlay = true;
         const token = generation;
         const id = sourceId;
-        await ready;
+        try { await ready; }
+        catch (error) { if (!recovery.pending()) throw error; }
         if (token !== generation || id !== sourceId || !wantsPlay) return false;
         if (!session) throw new Error('playback-backend-unavailable');
-        await session.play();
+        if (recovery.pending()) { recovery.resume(); return false; }
+        try { await session.play(); }
+        catch (error) {
+            if (token === generation && id === sourceId && await recovery.recover()) return false;
+            throw error;
+        }
         // A pause may have arrived while the backend was starting.
         if (!wantsPlay && token === generation) await session.pause();
         return token === generation && id === sourceId && wantsPlay;
     };
     const pause = async () => {
         wantsPlay = false;
+        recovery.cancel();
+        if (recovery.pending()) {
+            status = { ...status, state: 'paused' };
+            notify({ type: 'status', status });
+        }
         const token = generation;
         await ready.catch(() => {});
         if (token === generation) await session?.pause();
@@ -164,6 +233,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         await ready;
         if (id !== sourceId || !session) return;
         if (!definition?.capabilities.seek) throw new Error('backend-seek-unsupported');
+        if (recovery.pending()) { resumeStatus = status = { ...status, position: seconds }; return; }
         await session.seek(seconds);
     };
     const setVolume = async (value: number) => {
@@ -176,6 +246,12 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         setBackend, open, play, pause, seek, setVolume,
         stop: () => setBackend(definition, true),
         getStatus: () => status,
+        getSourceUrl: () => sourceUrl,
+        getTransferStatus: () => {
+            const transfer = recovery.snapshot();
+            return transfer ? { ...transfer, buffering: transfer.buffering || status.state === 'loading' } : null;
+        },
+        isWaitingForNetwork: () => Boolean(recovery.snapshot()?.buffering),
         getPosition: () => status.state === 'playing'
             ? Math.min(status.duration || Infinity, status.position + Math.min(1, (performance.now() - capturedAt) / 1000))
             : status.position,

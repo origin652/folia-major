@@ -175,7 +175,7 @@ export function usePlaybackInteractionBridge({
         }
 
         if (usesPlaybackBackend()) {
-            if (backendPlayback.getStatus().state === 'playing') pausePlayback();
+            if (backendPlayback.getStatus().state === 'playing' || backendPlayback.isWaitingForNetwork()) pausePlayback();
             else startPlaybackFromInteraction();
             return;
         }

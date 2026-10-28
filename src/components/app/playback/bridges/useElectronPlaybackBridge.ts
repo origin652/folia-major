@@ -298,6 +298,8 @@ export const useElectronPlaybackBridge = ({
         return {
             ...snapshot,
             canLike: canLikeCurrentSong,
+            audioTransfer: usesPlaybackBackend() && !snapshot.isStageActive && audioSrc
+                && backendPlayback.getSourceUrl() === audioSrc ? backendPlayback.getTransferStatus() : null,
             likeUnavailableProvider,
             // Store updates may precede this render's displayed song. Never publish new-song
             // action tickets underneath the previous song's title during that brief interval.

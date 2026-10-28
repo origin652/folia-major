@@ -1,6 +1,7 @@
 import type { PlayerState, LyricData, SubtitleContentMode } from '../types';
 import type { VideoExportPreset, VideoExportStartMode, VideoExportState } from './videoExport';
 import type { FoliumRemoteActionDef } from '../mods/folium/contract';
+import type { AudioTransferSnapshot } from './playbackTransfer';
 
 // src/types/remoteControl.ts
 // Shared payloads for the Electron remote control window.
@@ -103,4 +104,5 @@ export interface RemoteControlSnapshot {
     mainWindowWidth?: number;
     mainWindowHeight?: number;
     remoteActions?: RemoteActionsSnapshot;
+    audioTransfer?: AudioTransferSnapshot | null;
 }

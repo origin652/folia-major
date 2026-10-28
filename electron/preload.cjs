@@ -151,6 +151,9 @@ contextBridge.exposeInMainWorld('electron', {
         markPlayed: (id) => ipcRenderer.invoke('playback-source-played', id),
         progress: (id, seconds) => ipcRenderer.invoke('playback-source-progress', id, seconds),
         streamError: (id) => ipcRenderer.invoke('playback-source-stream-error', id),
+        transfer: (id) => ipcRenderer.invoke('playback-source-transfer', id),
+        probe: (id) => ipcRenderer.invoke('playback-source-probe', id),
+        cancelProbe: (id) => ipcRenderer.invoke('playback-source-cancel-probe', id),
         release: (id) => ipcRenderer.invoke('playback-source-release', id),
     },
     audioArchive: {
