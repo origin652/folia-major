@@ -63,7 +63,8 @@ export const useBackendPlayback = ({ audioRef, audioContextRef, pendingResumeTim
     }, [selected, shouldAutoPlayRef]);
 
     useEffect(() => backendPlayback.subscribe(event => {
-        if (!usesPlaybackBackend() || !usePlaybackStore.getState().audioSrc) return;
+        const playback = usePlaybackStore.getState();
+        if (!usesPlaybackBackend() || playback.activePlaybackContext === 'stage' || !playback.audioSrc) return;
         if (event.type === 'status') {
             const { status } = event;
             const store = usePlaybackStore.getState();

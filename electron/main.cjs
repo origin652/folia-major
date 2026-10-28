@@ -827,28 +827,40 @@ function scheduleWallpaperModeRelaunch(nextEnabled) {
 
   wallpaperModeRelaunchTimer = setTimeout(async () => {
     wallpaperModeRelaunchTimer = null;
-    // Windows detaches/recreates the window in place (no process relaunch); the playback
-    // handoff inside keeps the session alive across the renderer reload.
-    if (process.platform === 'win32') {
+    try {
+      // Windows detaches/recreates the window in place (no process relaunch); the playback
+      // handoff inside keeps the session alive across the renderer reload.
+      if (process.platform === 'win32') {
+        if (generation !== wallpaperModeRelaunchGeneration) {
+          return;
+        }
+        await relaunchForWallpaperModeChange(nextEnabled, generation);
+        return;
+      }
+      if (process.platform === 'darwin') {
+        // macOS switches in place — no handoff, no relaunch; the window is never destroyed.
+        if (generation !== wallpaperModeRelaunchGeneration) {
+          return;
+        }
+        await relaunchForWallpaperModeChange(nextEnabled, generation);
+        return;
+      }
+      await requestWindowPlaybackHandoff();
       if (generation !== wallpaperModeRelaunchGeneration) {
         return;
       }
-      await relaunchForWallpaperModeChange(nextEnabled, generation);
-      return;
-    }
-    if (process.platform === 'darwin') {
-      // macOS switches in place — no handoff, no relaunch; the window is never destroyed.
-      if (generation !== wallpaperModeRelaunchGeneration) {
-        return;
+      relaunchForWallpaperModeChange(nextEnabled);
+    } catch (error) {
+      console.error('[PlaybackBackend] Wallpaper mode change cancelled', error);
+      if (generation === wallpaperModeRelaunchGeneration) {
+        store.set(WALLPAPER_MODE_SETTING_KEY, !nextEnabled);
+        backgroundThrottling.refresh();
+        refreshTrayMenu();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('wallpaper-mode-changed', getPublicSettings());
+        }
       }
-      await relaunchForWallpaperModeChange(nextEnabled, generation);
-      return;
     }
-    await requestWindowPlaybackHandoff();
-    if (generation !== wallpaperModeRelaunchGeneration) {
-      return;
-    }
-    relaunchForWallpaperModeChange(nextEnabled);
   }, 300);
 }
 
@@ -2513,6 +2525,7 @@ const backgroundThrottling = createBackgroundThrottling({
     if (isWallpaperModeEnabled()) return 'wallpaper mode';
     if (videoExportWindowRestoreState) return 'video export';
     if (obsBrowserSourceClients.size > 0) return 'OBS browser source';
+    if (remoteControlWindow && !remoteControlWindow.isDestroyed()) return 'remote control';
     return null;
   },
 });
@@ -2584,7 +2597,7 @@ const FOLIA_RELEASES_URL = `https://github.com/${PERSONAL_UPDATES.owner}/${PERSO
 const FOLIA_GITHUB_REPOSITORY = PERSONAL_UPDATES;
 const WINDOWS_APP_USER_MODEL_ID = 'top.izuna.foliamajor';
 const REMOTE_CONTROL_WINDOW_TITLE = 'Folia Remote';
-const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 800;
+const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 15000;
 const bundledAppIconPath = path.join(__dirname, '../build/icon.png');
 const extraResourceIconPath = path.join(process.resourcesPath, 'icon.png');
 const bundledMacTrayIconPath = path.join(__dirname, '../build/trayTemplate.png');
@@ -3255,11 +3268,12 @@ async function setDesktopLyricMode(enabled) {
   // The preset has no state of its own: it only applies one exact combination of independent
   // window switches. Drop click-through before a possible window rebuild, then reapply it last.
   setMainWindowClickThroughEnabled(false);
+  if (isTransparentPlayerBackgroundEnabled() !== nextEnabled) {
+    const applied = await setMainWindowTransparentModeFromRemote(nextEnabled);
+    if (applied === false) return false;
+  }
   setMainWindowAlwaysOnTop(nextEnabled);
   persistMainWindowSkipTaskbarEnabled(nextEnabled);
-  if (isTransparentPlayerBackgroundEnabled() !== nextEnabled) {
-    await setMainWindowTransparentModeFromRemote(nextEnabled);
-  }
   if (nextEnabled) {
     setMainWindowClickThroughEnabled(true);
   }
@@ -5088,9 +5102,8 @@ function rememberWindowPlaybackHandoff(handoff) {
   return windowPlaybackHandoffStore.save(handoff);
 }
 
-function resolvePendingWindowPlaybackHandoffRequest(requestId, handoff) {
+function resolvePendingWindowPlaybackHandoffRequest(requestId, handoff, error) {
   const pendingRequest = pendingWindowPlaybackHandoffRequests.get(requestId);
-  rememberWindowPlaybackHandoff(handoff);
 
   if (!pendingRequest) {
     return false;
@@ -5098,6 +5111,11 @@ function resolvePendingWindowPlaybackHandoffRequest(requestId, handoff) {
 
   clearTimeout(pendingRequest.timeoutId);
   pendingWindowPlaybackHandoffRequests.delete(requestId);
+  if (error) {
+    pendingRequest.reject(new Error('Playback output cleanup failed; window mode change cancelled.'));
+    return true;
+  }
+  rememberWindowPlaybackHandoff(handoff);
   pendingRequest.resolve(handoff || null);
   return true;
 }
@@ -5111,14 +5129,15 @@ function requestWindowPlaybackHandoff(timeoutMs = WINDOW_PLAYBACK_HANDOFF_REQUES
     ? crypto.randomUUID()
     : crypto.randomBytes(16).toString('hex');
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       pendingWindowPlaybackHandoffRequests.delete(requestId);
-      resolve(null);
+      reject(new Error('Playback handoff timed out; window mode change cancelled.'));
     }, timeoutMs);
 
     pendingWindowPlaybackHandoffRequests.set(requestId, {
       resolve,
+      reject,
       timeoutId,
     });
 
@@ -5128,7 +5147,7 @@ function requestWindowPlaybackHandoff(timeoutMs = WINDOW_PLAYBACK_HANDOFF_REQUES
       clearTimeout(timeoutId);
       pendingWindowPlaybackHandoffRequests.delete(requestId);
       console.warn('[Electron] Failed to request window playback handoff', error);
-      resolve(null);
+      reject(error);
     }
   });
 }
@@ -5454,6 +5473,7 @@ function createRemoteControlWindow() {
   });
 
   remoteControlWindow = win;
+  backgroundThrottling.refresh();
   remoteControlPointerInside = false;
   remoteControlMouseIgnored = false;
   clearInterval(remoteControlPointerTimer);
@@ -5507,6 +5527,7 @@ function createRemoteControlWindow() {
     clearRemoteControlPositionSaveTimer();
     if (remoteControlWindow === win) {
       remoteControlWindow = null;
+      backgroundThrottling.refresh();
       clearInterval(remoteControlPointerTimer);
       remoteControlPointerTimer = null;
     }
@@ -5960,6 +5981,10 @@ async function setMainWindowTransparentMode(enabled, handoff = null) {
 }
 
 async function setMainWindowTransparentModeFromRemote(enabled) {
+  if (Boolean(enabled) === isTransparentPlayerBackgroundEnabled()) return true;
+  if (enabled && process.platform === 'win32' && isWindowsWallpaperMode() && !isWindowsWallpaperTransparentSupported()) {
+    return setMainWindowTransparentMode(enabled);
+  }
   const handoff = await requestWindowPlaybackHandoff();
   return setMainWindowTransparentMode(enabled, handoff);
 }
@@ -7105,7 +7130,8 @@ ipcMain.handle('window-set-transparent-mode', async (event, enabled, handoff) =>
     return false;
   }
 
-  return setMainWindowTransparentMode(Boolean(enabled), handoff);
+  return handoff ? setMainWindowTransparentMode(Boolean(enabled), handoff)
+    : setMainWindowTransparentModeFromRemote(Boolean(enabled));
 });
 
 ipcMain.handle('window-playback-handoff-consume', (event) => {
@@ -7116,7 +7142,7 @@ ipcMain.handle('window-playback-handoff-consume', (event) => {
   return windowPlaybackHandoffStore.consume();
 });
 
-ipcMain.handle('window-playback-handoff-submit', (event, requestId, handoff) => {
+ipcMain.handle('window-playback-handoff-submit', (event, requestId, handoff, error) => {
   if (!isTrustedMainWindowContents(event.sender)) {
     return false;
   }
@@ -7125,7 +7151,7 @@ ipcMain.handle('window-playback-handoff-submit', (event, requestId, handoff) => 
     return rememberWindowPlaybackHandoff(handoff);
   }
 
-  return resolvePendingWindowPlaybackHandoffRequest(requestId, handoff);
+  return resolvePendingWindowPlaybackHandoffRequest(requestId, handoff, error);
 });
 
 ipcMain.handle('window-get-click-through', (event) => {

@@ -27,6 +27,9 @@ import { lyricsBeforeRules } from '../../../../utils/lyrics/lyricLineRules';
 import { reportYieldedQueue, wholeQueueWritesSoFar } from '../../../../services/wholeQueueWrites';
 import { getHifiPosition, installHifiPlayback, isHifiRoute, releaseUnclaimedHifiTrack } from '../../../../services/hifi/hifiPlayback';
 import { hifiEngine } from '../../../../services/hifi/hifiEngine';
+import { selectedPlaybackBackend } from '../../../../services/playbackBackend/registry';
+import { readBackendHandoffPosition, releaseBackendForWindowHandoff, restoreBackendFromWindowHandoff } from '../../../../services/playbackBackend/windowHandoff';
+import i18n from '../../../../i18n/config';
 
 // src/components/app/playback/restore/useElectronWindowPlaybackHandoff.ts
 // Captures and restores renderer playback state across Electron BrowserWindow rebuilds.
@@ -115,7 +118,8 @@ const buildPlaybackSnapshot = ({
     isFmMode,
     playerState,
     // On the HiFi route <audio> sits idle: the position is mpv's, as its clock reads it now.
-    currentTime: isHifiRoute() ? getHifiPosition() : (audioRef.current?.currentTime ?? currentTime.get()),
+    currentTime: readBackendHandoffPosition()
+        ?? (isHifiRoute() ? getHifiPosition() : (audioRef.current?.currentTime ?? currentTime.get())),
     duration,
     currentLineIndex,
 });
@@ -197,6 +201,7 @@ export function useElectronWindowPlaybackHandoff({
 
         return {
             version: 1,
+            playbackBackendId: selectedPlaybackBackend(),
             capturedAt: Date.now(),
             activePlaybackContext,
             mainPlayback,
@@ -377,6 +382,8 @@ export function useElectronWindowPlaybackHandoff({
             return false;
         }
 
+        restoreBackendFromWindowHandoff(handoff);
+
         setIsPlayerChromeHidden(handoff.ui.playerChromeHidden);
         setShowTransparentWindowBorder(handoff.ui.mainWindowBorderVisible);
         if (handoff.ui.currentView === 'player') {
@@ -393,7 +400,9 @@ export function useElectronWindowPlaybackHandoff({
         }
 
         setActivePlaybackContext('main');
-        await restoreMainPlaybackSnapshot(handoff.mainPlayback ?? handoff.activePlayback);
+        const snapshot = handoff.mainPlayback ?? handoff.activePlayback;
+        await restoreMainPlaybackSnapshot(handoff.playbackBackendId && snapshot
+            ? { ...snapshot, playerState: PlayerState.PAUSED } : snapshot);
         return true;
     }, [
         mainPlaybackSnapshotRef,
@@ -406,10 +415,26 @@ export function useElectronWindowPlaybackHandoff({
     ]);
     restoreWindowPlaybackHandoffRef.current = restoreWindowPlaybackHandoff;
 
+    const preparingHandoffRef = useRef<Promise<WindowPlaybackHandoff> | null>(null);
+    const prepareWindowHandoff = useCallback(() => {
+        if (preparingHandoffRef.current) return preparingHandoffRef.current;
+        const preparing = releaseBackendForWindowHandoff(captureWindowPlaybackHandoff());
+        preparingHandoffRef.current = preparing;
+        const clear = () => { if (preparingHandoffRef.current === preparing) preparingHandoffRef.current = null; };
+        void preparing.then(clear, clear);
+        return preparing;
+    }, [captureWindowPlaybackHandoff]);
+
     const toggleTransparentModeWithHandoff = useCallback(async (enabled: boolean) => {
         if (isElectronWindow && window.electron?.setWindowTransparentMode) {
-            const handoff = captureWindowPlaybackHandoff();
-            const applied = await window.electron.setWindowTransparentMode(enabled, handoff);
+            // The main process checks support/no-op first, then requests the same cleanup as Remote.
+            let applied;
+            try { applied = await window.electron.setWindowTransparentMode(enabled); }
+            catch (error) {
+                console.error('[PlaybackBackend] Window mode change failed', error);
+                setStatusMsg({ type: 'error', text: i18n.t('options.playbackBackendFailed') });
+                return;
+            }
             // Main refuses the enable toggle when the current desktop cannot present a
             // transparent wallpaper window (classic Windows wallpaper mode); keep the old state.
             if (applied === false) {
@@ -417,7 +442,7 @@ export function useElectronWindowPlaybackHandoff({
             }
         }
         applyTransparentPlayerBackground(enabled);
-    }, [applyTransparentPlayerBackground, captureWindowPlaybackHandoff, isElectronWindow]);
+    }, [applyTransparentPlayerBackground, isElectronWindow]);
 
     useEffect(() => {
         if (!isElectronWindow || !window.electron?.onWindowPlaybackHandoffRequested || !window.electron?.submitWindowPlaybackHandoff) {
@@ -425,9 +450,16 @@ export function useElectronWindowPlaybackHandoff({
         }
 
         return window.electron.onWindowPlaybackHandoffRequested(({ requestId }) => {
-            void window.electron?.submitWindowPlaybackHandoff(requestId, captureWindowPlaybackHandoff());
+            void prepareWindowHandoff().then(
+                handoff => window.electron?.submitWindowPlaybackHandoff(requestId, handoff),
+                error => {
+                    console.error('[PlaybackBackend] Window handoff cleanup failed', error);
+                    setStatusMsg({ type: 'error', text: i18n.t('options.playbackBackendFailed') });
+                    return window.electron?.submitWindowPlaybackHandoff(requestId, null, 'playback-backend-cleanup-failed');
+                },
+            ).catch(error => console.error('[PlaybackBackend] Submitting window handoff failed', error));
         });
-    }, [captureWindowPlaybackHandoff, isElectronWindow]);
+    }, [prepareWindowHandoff, isElectronWindow]);
 
     useEffect(() => {
         if (!isElectronWindow || !window.electron?.consumeWindowPlaybackHandoff) {

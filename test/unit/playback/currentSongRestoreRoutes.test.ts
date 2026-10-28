@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerState, type LocalSong, type SongResult } from '@/types';
 import type { PlaybackSnapshot, WindowPlaybackHandoff } from '@/types/appPlayback';
 import type { OnlineFailureCaseId } from '@/types/onlineMusic';
+import { registerPlaybackBackend, restorePlaybackBackendSelection, selectPlaybackBackend, selectedPlaybackBackend } from '@/services/playbackBackend/registry';
+import { backendPlayback } from '@/services/playbackBackend/controller';
 
 // test/unit/playback/currentSongRestoreRoutes.test.ts
 // Pins what the routes that bring a remembered song back write for the current song: the restore of
@@ -1407,10 +1409,10 @@ describe('a local or Navidrome restore on the HiFi route', () => {
             ui: { currentView: 'home', playerChromeHidden: false, mainWindowBorderVisible: false, transparentModeEnabled: false },
         } as unknown as WindowPlaybackHandoff);
         /** Mounts the hand-off as App does; with a snapshot, the new window consumes it. */
-        const mountHandoff = (snapshot: PlaybackSnapshot | null, audioTime = 0) => {
+        const mountHandoff = (snapshot: PlaybackSnapshot | null, audioTime = 0, playbackBackendId?: string) => {
             const { refs, watch, setLyrics } = watchWithRefs();
             vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} });
-            vi.stubGlobal('window', { electron: { consumeWindowPlaybackHandoff: async () => (snapshot ? handoffOf(snapshot) : null) } });
+            vi.stubGlobal('window', { electron: { consumeWindowPlaybackHandoff: async () => (snapshot ? { ...handoffOf(snapshot), playbackBackendId } : null) } });
             const handoff = useElectronWindowPlaybackHandoff({
                 isElectronWindow: true, navigateToPlayer: vi.fn(), audioRef: { current: { currentTime: audioTime } }, mainPlaybackSnapshotRef: { current: null },
                 stageStatus: null, stageSource: null, stageLyricsClockRef: { current: {} }, nowPlayingTrack: null, nowPlayingLyricPayload: null,
@@ -1454,6 +1456,40 @@ describe('a local or Navidrome restore on the HiFi route', () => {
             env.onHifiRoute = true;
             env.hifiPosition = 71.5;
             expect(handoff.captureWindowPlaybackHandoff().mainPlayback?.currentTime).toBe(71.5);
+        });
+
+        it('captures an arbitrary mod clock instead of idle HTML audio', () => {
+            makeSongCurrent(localSong);
+            restorePlaybackBackendSelection('arbitrary:output');
+            const status = vi.spyOn(backendPlayback, 'getStatus').mockReturnValue({ sourceId: 'one', state: 'playing', position: 83.5, duration: 100 });
+            const position = vi.spyOn(backendPlayback, 'getPosition').mockReturnValue(83.5);
+            try {
+                const { handoff } = mountHandoff(null, 0);
+                expect(handoff.captureWindowPlaybackHandoff()).toMatchObject({
+                    playbackBackendId: 'arbitrary:output', mainPlayback: { currentTime: 83.5 },
+                });
+            } finally {
+                position.mockRestore(); status.mockRestore(); selectPlaybackBackend(null);
+            }
+        });
+
+        it('restores the explicit missing mod choice before the source, leaving playback paused', async () => {
+            try {
+                const { refs } = mountHandoff(snapshotOf(localSong), 0, 'late-mod:output');
+                effectNaming('consumeWindowPlaybackHandoff()')();
+                await settle();
+                expect(selectedPlaybackBackend()).toBe('late-mod:output');
+                expect(refs.shouldAutoPlay.current).toBe(false);
+                expect(refs.pendingResumeTimeRef.current).toBe(12);
+                expect(usePlaybackStore.getState().playerState).toBe(PlayerState.PAUSED);
+                const create = vi.fn();
+                const off = registerPlaybackBackend('unrelated:output', {
+                    name: 'Unrelated output', capabilities: { http: true, volume: true, seek: true }, create,
+                });
+                off();
+                expect(create).not.toHaveBeenCalled();
+                expect(selectedPlaybackBackend()).toBe('late-mod:output');
+            } finally { selectPlaybackBackend(null); }
         });
     });
 });

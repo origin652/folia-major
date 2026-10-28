@@ -31,7 +31,7 @@ export const PlaybackBackendRow = ({ option, onSelectMpv }: { option: SettingsOp
         options.push({ value: `mod:${selected}`, label: t('options.playbackBackendMissing') });
     }
     const output = selected ? status.output : undefined;
-    const unavailable = !supportsMpv && entries.length === 0;
+    const unavailable = !supportsMpv && entries.length === 0 && !selected;
     return (
         <Row option={option} hint={t(unavailable ? 'hifi.settings.unsupported' : 'options.playbackBackendHint')} disabled={unavailable}>
             {output && <Status tone={output.exclusiveRequested && output.exclusiveActive !== true ? 'warn' : undefined}>
@@ -40,7 +40,7 @@ export const PlaybackBackendRow = ({ option, onSelectMpv }: { option: SettingsOp
                 {output.sampleRate ? ` · ${output.sampleRate} Hz` : ''}
                 {output.format ? ` · ${output.format}` : ''}
             </Status>}
-            <Select value={selectedPlaybackEngine()} options={options} disabled={switching || stage || (!supportsMpv && entries.length === 0)} onChange={value => {
+            <Select value={selectedPlaybackEngine()} options={options} disabled={switching || stage || unavailable} onChange={value => {
                 if (value === 'mpv') { onSelectMpv(); return; }
                 void selectPlaybackEngine(value).catch(error => {
                     console.error('[PlaybackBackend] Engine selection failed', error);

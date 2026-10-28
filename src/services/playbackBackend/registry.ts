@@ -38,6 +38,14 @@ export const selectPlaybackBackend = (id: string | null) => {
     notify();
 };
 
+/** Only a window handoff may retain a selection whose mod has not finished registering. */
+export const restorePlaybackBackendSelection = (id: string) => {
+    if (typeof id !== 'string' || !id.trim() || id.length > 256) throw new TypeError('invalid-playback-backend-id');
+    if (selected === id) return;
+    selected = id;
+    notify();
+};
+
 export const registerPlaybackBackend = (id: string, definition: PlaybackBackendDefinition) => {
     if (entries.has(id)) throw new Error(`duplicate-playback-backend:${id}`);
     if (!definition?.name || typeof definition.create !== 'function') throw new TypeError('invalid-playback-backend');

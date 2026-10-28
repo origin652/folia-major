@@ -978,6 +978,7 @@ declare global {
       submitWindowPlaybackHandoff: (
         requestId: string,
         handoff: import('./types/appPlayback').WindowPlaybackHandoff | null,
+        error?: string,
       ) => Promise<boolean>;
       onWindowPlaybackHandoffRequested: (
         callback: (payload: { requestId: string }) => void,

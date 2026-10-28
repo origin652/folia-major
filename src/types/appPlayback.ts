@@ -129,6 +129,8 @@ export type WindowPlaybackHandoffStageState = {
 
 export type WindowPlaybackHandoff = {
     version: 1;
+    /** Internal window rebuild only, not a preference to activate a mod on ordinary startup. */
+    playbackBackendId?: string | null;
     capturedAt: number;
     activePlaybackContext: 'main' | 'stage';
     mainPlayback: PlaybackSnapshot | null;
