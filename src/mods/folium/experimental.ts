@@ -134,6 +134,7 @@ export const createFoliumExperimental = (
     onRelease: (release: () => void) => void = () => {},
 ): Record<string, unknown> => ({
     [FOLIUM_EXPERIMENTAL.playbackBackends]: Object.freeze({
+        supportsStreams: typeof window !== 'undefined' && Boolean(window.electron?.playbackSources?.stream),
         register: (def: FoliumPlaybackBackendDefinition) => {
             if (!mod.permissions.includes('playback.backend')) throw new Error('permission-denied:playback.backend');
             return stopped('experimental playback.backends.register')

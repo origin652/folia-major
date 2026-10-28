@@ -104,6 +104,8 @@ const { isWindowAlwaysOnTopSupported } = require('./windowAlwaysOnTopSupport.cjs
 const { createGlobalShortcutController, usesGlobalShortcutsPortal } = require('./globalShortcuts.cjs');
 const { createTranscodeService } = require('./transcode/service.cjs');
 const { createPlaybackSourceStore } = require('./playbackBackends/sources.cjs');
+const { createPlaybackStreams } = require('./playbackBackends/streams.cjs');
+const { registerPlaybackSourceIpc } = require('./playbackBackends/ipc.cjs');
 const { TRANSCODE_PROTOCOL_SCHEME } = require('./transcode/protocol.cjs');
 const { createMpvRuntime } = require('./hifi/mpvRuntime.cjs');
 const { createMpvRuntimeInstaller } = require('./hifi/mpvRuntimeInstaller.cjs');
@@ -281,6 +283,12 @@ const transcodeService = createTranscodeService({
   onCacheWrite: pruneMediaCache,
 });
 const playbackSourceStore = createPlaybackSourceStore(path.join(app.getPath('userData'), 'playback-sources'));
+const playbackStreams = createPlaybackStreams({
+  // Omni already resolved access; never attach the user's cookie jar to arbitrary media URLs.
+  fetchFn: (url, options) => electronNet.fetch(url, { ...options, credentials: 'omit' }),
+  protocol,
+  protocols: [`${TRANSCODE_PROTOCOL_SCHEME}:`],
+});
 // HiFi: an mpv child plays local and Navidrome songs bit-perfectly. Main only spawns it, relays the
 // main window's commands and pushes state back, with error codes and no text of its own. The
 // 127.0.0.1 source bridge starts on the first load, mpv on the first load or device listing.
@@ -6040,8 +6048,8 @@ app.whenReady().then(async () => {
   setupVideoExportDisplayMediaHandler();
   setupCorsBypassHandlers();
   localCoverAssetStore.registerProtocolHandler(protocol, electronNet);
-  protocol.handle(YTM_AUDIO_SCHEME, request => ytmApiBridge.handleAudioRequest(request));
-  protocol.handle(SPOTIFY_AUDIO_SCHEME, request => spotifyApiBridge.handleAudioRequest(request));
+  playbackStreams.registerProtocol(YTM_AUDIO_SCHEME, request => ytmApiBridge.handleAudioRequest(request));
+  playbackStreams.registerProtocol(SPOTIFY_AUDIO_SCHEME, request => spotifyApiBridge.handleAudioRequest(request));
   // Transcode fallback is an optional degradation path; a failure preparing it must never keep
   // the rest of this handler, createWindow() included, from running.
   try {
@@ -6322,6 +6330,7 @@ app.on('before-quit', (event) => {
   isQuitHeldForAccounts = false;
   transcodeService.dispose();
   void playbackSourceStore.dispose();
+  void playbackStreams.dispose();
   hifiSession.killSync();
   // An mpv download the quit cuts off is stopped: its partial files go now if there is time, or
   // with the installer's sweep of leftovers next time.
@@ -6401,17 +6410,9 @@ app.on('before-quit', (event) => {
 });
 
 // Settings Management IPC
-ipcMain.handle('playback-source-stage', (event, data) => {
-  if (!isTrustedMainWindowContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
-    throw new Error('Untrusted playback source request');
-  }
-  return playbackSourceStore.stage(data);
-});
-ipcMain.handle('playback-source-release', (event, id) => {
-  if (!isTrustedMainWindowContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
-    throw new Error('Untrusted playback source request');
-  }
-  return playbackSourceStore.release(id);
+registerPlaybackSourceIpc({
+  ipcMain, files: playbackSourceStore, streams: playbackStreams,
+  isTrusted: isTrustedMainWindowContents,
 });
 
 ipcMain.handle('window-set-native-theme', (event, themeSource) => {

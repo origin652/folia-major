@@ -15,10 +15,15 @@ afterEach(async () => {
     off();
     hifiMediaShim.reset();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
 });
 
 describe('mod media observations', () => {
     it('keeps mpv and mod clocks separate, ignores stale sources and does not repeat playing events on every tick', async () => {
+        vi.stubGlobal('window', { electron: { playbackSources: {
+            stream: async () => ({ id: 'lease', url: 'http://127.0.0.1:12345/opaque/audio' }),
+            release: async () => {},
+        } } });
         vi.useFakeTimers();
         usePlaybackStore.setState({ activePlaybackContext: 'main', playbackRoute: 'web' });
         let report!: (event: PlaybackBackendEvent) => void;

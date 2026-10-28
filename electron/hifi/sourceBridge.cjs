@@ -19,8 +19,8 @@ const FORWARDED_REMOTE_HEADERS = [
 ];
 // 只认可见 ASCII 的 MIME，渲染端传来的值不合规时 setHeader 会抛错。
 const SAFE_MIME_TYPE = /^[\x21-\x7e][\x20-\x7e]{0,254}$/;
-// Subsonic 的认证参数：u 用户名，t/s 令牌和盐，p 旧式密码，apiKey 是 OpenSubsonic 的密钥。
-const CREDENTIAL_PARAMS = ['u', 't', 's', 'p', 'apiKey'];
+// Subsonic credentials and common signed-media keys; ordinary client/version parameters are not secrets.
+const CREDENTIAL_PARAM = /^(?:u|t|s|p|apikey|token|key|vkey|sign|signature|auth|authorization|access_token|session|k)$/i;
 
 const tokenLabel = token => token.slice(0, 8);
 
@@ -77,7 +77,7 @@ const cancelBody = response => {
 const credentialFragments = url => {
     try {
         const parsed = new URL(url);
-        const values = CREDENTIAL_PARAMS.map(name => parsed.searchParams.get(name));
+        const values = [...parsed.searchParams].filter(([name]) => CREDENTIAL_PARAM.test(name)).map(([, value]) => value);
         return [parsed.search, parsed.username, parsed.password, ...values]
             .filter(value => typeof value === 'string' && value.length >= 3);
     } catch {
@@ -105,11 +105,15 @@ function createSourceBridge(options = {}) {
         unknownSourceRetryMs = 250,
         unknownSourceGiveUpMs = 8000,
         randomBytes = cryptoRandomBytes,
-        logInfo = (...args) => console.info(...args),
-        logWarn = (...args) => console.warn(...args),
+        logInfo: writeInfo = (...args) => console.info(...args),
+        logWarn: writeWarn = (...args) => console.warn(...args),
+        logPrefix = '[HiFi]',
+        allowedRemoteProtocols = ['http:', 'https:'],
         now = () => Date.now(),
         setTimeoutFn = (callback, ms) => setTimeout(callback, ms),
     } = options;
+    const logInfo = (line, ...args) => writeInfo(line.replace(/^\[HiFi\]/, logPrefix), ...args);
+    const logWarn = (line, ...args) => writeWarn(line.replace(/^\[HiFi\]/, logPrefix), ...args);
 
     /** token → { kind: 'local', sourceKey, size, mimeType, ownerId } | { kind: 'remote', url, host } */
     const sources = new Map();
@@ -164,8 +168,8 @@ function createSourceBridge(options = {}) {
         } catch {
             parsed = null;
         }
-        if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
-            throw createHifiError('INVALID_REQUEST', 'remote source URL must be http or https');
+        if (!parsed || !allowedRemoteProtocols.includes(parsed.protocol)) {
+            throw createHifiError('INVALID_REQUEST', 'remote source URL must use an allowed protocol (http or https by default)');
         }
         const listeningPort = requirePort();
         const token = allocateToken({ kind: 'remote', url: parsed.href, host: parsed.host });

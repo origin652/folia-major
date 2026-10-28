@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld('electron', {
     requestTranscodeFallback: (request) => ipcRenderer.invoke('transcode-fallback-request', request),
     playbackSources: {
         stage: (data) => ipcRenderer.invoke('playback-source-stage', data),
+        stream: (url) => ipcRenderer.invoke('playback-source-stream', url),
+        streamError: (id) => ipcRenderer.invoke('playback-source-stream-error', id),
         release: (id) => ipcRenderer.invoke('playback-source-release', id),
     },
     cancelTranscodeFallback: (requestId) => ipcRenderer.invoke('transcode-fallback-cancel', requestId),

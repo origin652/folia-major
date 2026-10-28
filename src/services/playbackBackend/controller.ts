@@ -32,7 +32,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         try { await source?.release(); }
         catch (error) { console.warn('[PlaybackBackend] Releasing source failed', error); }
     };
-    const report = (event: PlaybackBackendEvent, token: number) => {
+    const deliver = (event: PlaybackBackendEvent, token: number) => {
         if (token !== generation) return;
         const eventSource = event.type === 'status' ? event.status?.sourceId : event.sourceId;
         if (!sourceId || eventSource !== sourceId) return;
@@ -49,6 +49,19 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
             };
         }
         notify(event);
+    };
+    const report = (event: PlaybackBackendEvent, token: number) => {
+        if (token !== generation) return;
+        if ((event.type === 'status' ? event.status?.sourceId : event.sourceId) !== sourceId) return;
+        // An interrupted authenticated stream is not EOF, even if a backend treats early stops as ended.
+        const source = prepared;
+        if (event.type !== 'ended' || !source?.getError) { deliver(event, token); return; }
+        void source.getError().then(code => {
+            if (prepared !== source) return;
+            deliver(code ? { type: 'error', sourceId: event.sourceId, message: `Playback stream failed (${code})` } : event, token);
+        }).catch(() => {
+            if (prepared === source) deliver({ type: 'error', sourceId: event.sourceId, message: 'Playback stream status unavailable' }, token);
+        });
     };
 
     const setBackend = async (next: PlaybackBackendDefinition | null, force = false) => {

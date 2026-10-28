@@ -52,6 +52,40 @@ describe('backend registry', () => {
 });
 
 describe('backend controller', () => {
+    it('turns a failed host stream into an error instead of advancing the queue', async () => {
+        const b = mockBackend();
+        const source = staged();
+        const getError = vi.fn(async () => 'SOURCE_UNREACHABLE');
+        const c = createBackendController(async (url, id) => ({ ...await source.prepare(url, id), getError }));
+        const events: PlaybackBackendEvent[] = [];
+        c.subscribe(event => events.push(event));
+        await c.setBackend(b.definition);
+        await c.open('https://test/signed');
+        b.report({ type: 'ended', sourceId: c.getStatus().sourceId });
+        await vi.waitFor(() => expect(events.at(-1)?.type).toBe('error'));
+        expect(events.some(event => event.type === 'ended')).toBe(false);
+        expect(c.getStatus().state).toBe('paused');
+        await c.setBackend(null);
+    });
+    it('does not let an asynchronous EOF check affect a newer source', async () => {
+        const b = mockBackend();
+        let answer!: (code: string | null) => void;
+        const getError = vi.fn(() => new Promise<string | null>(resolve => { answer = resolve; }));
+        const c = createBackendController(async (url, sourceId) => ({ source: { sourceId, url }, release: async () => {}, getError }));
+        const events: PlaybackBackendEvent[] = [];
+        c.subscribe(event => events.push(event));
+        await c.setBackend(b.definition);
+        await c.open('https://test/old');
+        const id = c.getStatus().sourceId;
+        b.report({ type: 'ended', sourceId: id });
+        await c.open('https://test/new');
+        answer('SOURCE_UNREACHABLE');
+        await Promise.resolve();
+        expect(events.some(event => event.type === 'ended' || event.type === 'error')).toBe(false);
+        b.report({ type: 'ended', sourceId: id });
+        expect(getError).toHaveBeenCalledTimes(1);
+        await c.setBackend(null);
+    });
     it('retains failed cleanup and never creates another output or releases its source until disposal succeeds', async () => {
         const old = mockBackend();
         const next = mockBackend();

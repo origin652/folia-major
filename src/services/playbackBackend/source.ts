@@ -1,19 +1,33 @@
 import type { PlaybackBackendSource } from './types';
 
-// Blob/custom-protocol bytes cross the preload bridge, never JSON RPC or Web Audio decoding.
+// Prepare revocable host streams or opaque staged files without decoding in the browser.
 
 export interface PlaybackSourceBridge {
     stage(data: ArrayBuffer): Promise<{ id: string; filePath: string }>;
+    stream?(url: string): Promise<{ id: string; url: string }>;
+    streamError?(id: string): Promise<string | null>;
     release(id: string): Promise<void>;
 }
 
-export const prepareBackendSource = async (url: string, sourceId: string, allowHttp: boolean) => {
-    if (allowHttp && /^https?:\/\//i.test(url)) {
-        return { source: { sourceId, url } as PlaybackBackendSource, release: async () => {} };
-    }
+export interface PreparedBackendSource {
+    source: PlaybackBackendSource;
+    release(): Promise<void>;
+    getError?(): Promise<string | null>;
+}
+
+export const prepareBackendSource = async (url: string, sourceId: string, allowHttp: boolean): Promise<PreparedBackendSource> => {
     if (!/^(blob:|https?:|folia-)/i.test(url)) throw new Error('unsupported-playback-source');
     const bridge = window.electron?.playbackSources;
     if (!bridge) throw new Error('playback-source-bridge-unavailable');
+    if (allowHttp && !/^blob:/i.test(url)) {
+        if (!bridge.stream) throw new Error('playback-stream-bridge-unavailable');
+        const leased = await bridge.stream(url);
+        return {
+            source: { sourceId, url: leased.url },
+            release: () => bridge.release(leased.id),
+            getError: () => bridge.streamError?.(leased.id) ?? Promise.resolve(null),
+        };
+    }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`playback-source-http:${response.status}`);
     const length = Number(response.headers.get('content-length'));

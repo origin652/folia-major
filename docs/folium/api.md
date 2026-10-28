@@ -639,7 +639,7 @@ EXPERIMENTAL playback.backends: structurally mirrors the engine-independent host
 | 成员 | 类型 | 说明 |
 | --- | --- | --- |
 | `sourceId` | `string` | Host-generated load identity; echo it in every event. |
-| `url?` | `string` | HTTP(S) URL, only when the backend declares HTTP support. |
+| `url?` | `string` | Revocable host-owned loopback stream; provider URLs and account credentials stay in the host. |
 | `filePath?` | `string` | Host-staged local copy; valid until the session retires this load. |
 
 ### FoliumPlaybackBackendStatus
@@ -692,7 +692,7 @@ Registration alone never selects an output; users select it in playback settings
 | --- | --- | --- |
 | `id` | `string` | Local registration name; the host namespaces it with the mod id. |
 | `name` | `string` | Display name in playback settings. |
-| `capabilities` | `{ seek: boolean; volume: boolean; http: boolean }` | Supported host operations and whether an HTTP URL can be opened directly. |
+| `capabilities` | `{ seek: boolean; volume: boolean; http: boolean }` | Supported host operations and whether a host-owned HTTP stream can be opened. |
 | `create()` | `(report: (event: FoliumPlaybackBackendEvent) => void): FoliumPlaybackBackendSession` | Creates one transport session; report status at a bounded rate (up to 4 Hz recommended). |
 
 相关：[FoliumPlaybackBackendEvent](#foliumplaybackbackendevent) · [FoliumPlaybackBackendSession](#foliumplaybackbackendsession)
@@ -703,6 +703,7 @@ EXPERIMENTAL playback.backends, main window only; requires playback.backend perm
 
 | 成员 | 类型 | 说明 |
 | --- | --- | --- |
+| `readonly supportsStreams?` | `boolean` | Whether the host can lease authenticated media streams; absent on older hosts. |
 | `register()` | `(definition: FoliumPlaybackBackendDefinition): FoliumRegistryHandle` | Offers a backend without selecting it. Unregistering a selected backend stops playback, without fallback. |
 
 相关：[FoliumPlaybackBackendDefinition](#foliumplaybackbackenddefinition) · [FoliumRegistryHandle](#foliumregistryhandle)

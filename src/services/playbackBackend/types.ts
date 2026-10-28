@@ -3,6 +3,7 @@
 export interface PlaybackBackendSource {
     /** Unique to this load; every asynchronous event must carry it back. */
     sourceId: string;
+    /** Host-owned loopback lease, not a provider URL or account credential. */
     url?: string;
     /** A host-created temporary copy, not a path supplied by an online provider. */
     filePath?: string;

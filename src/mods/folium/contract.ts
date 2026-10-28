@@ -649,7 +649,7 @@ export interface FoliumAudio {
 export interface FoliumPlaybackBackendSource {
     /** Host-generated load identity; echo it in every event. */
     sourceId: string;
-    /** HTTP(S) URL, only when the backend declares HTTP support. */
+    /** Revocable host-owned loopback stream; provider URLs and account credentials stay in the host. */
     url?: string;
     /** Host-staged local copy; valid until the session retires this load. */
     filePath?: string;
@@ -708,7 +708,7 @@ export interface FoliumPlaybackBackendDefinition {
     id: string;
     /** Display name in playback settings. */
     name: string;
-    /** Supported host operations and whether an HTTP URL can be opened directly. */
+    /** Supported host operations and whether a host-owned HTTP stream can be opened. */
     capabilities: { seek: boolean; volume: boolean; http: boolean };
     /** Creates one transport session; report status at a bounded rate (up to 4 Hz recommended). */
     create(report: (event: FoliumPlaybackBackendEvent) => void): FoliumPlaybackBackendSession;
@@ -716,6 +716,8 @@ export interface FoliumPlaybackBackendDefinition {
 
 /** EXPERIMENTAL playback.backends, main window only; requires playback.backend permission. */
 export interface FoliumPlaybackBackends {
+    /** Whether the host can lease authenticated media streams; absent on older hosts. */
+    readonly supportsStreams?: boolean;
     /** Offers a backend without selecting it. Unregistering a selected backend stops playback, without fallback. */
     register(definition: FoliumPlaybackBackendDefinition): FoliumRegistryHandle;
 }
