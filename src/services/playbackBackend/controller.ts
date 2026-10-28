@@ -214,7 +214,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         }
         // A pause may have arrived while the backend was starting.
         if (!wantsPlay && token === generation) await session.pause();
-        return token === generation && id === sourceId && wantsPlay;
+        return token === generation && id === sourceId && wantsPlay && !recovery.pending();
     };
     const pause = async () => {
         wantsPlay = false;

@@ -132,4 +132,11 @@ describe('HTTP backend network recovery', () => {
         expect(s.probe).toHaveBeenCalledOnce();
         expect(s.session.open).toHaveBeenCalledOnce();
     });
+    it('does not tell the UI playback started if a backend reports a stream failure while play resolves', async () => {
+        const s = await tracked();
+        s.session.play.mockImplementationOnce(async () => s.interrupt());
+        expect(await s.c.play()).toBe(false);
+        await flush();
+        expect(s.c.getStatus().state).toBe('loading');
+    });
 });
