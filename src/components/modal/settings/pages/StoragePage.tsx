@@ -46,7 +46,7 @@ const StoragePage: React.FC = () => {
 
     return (
         <>
-            <Group def={MEDIA}>
+            <Group def={MEDIA} foot={isElectron ? t('options.audioStorageHint') : undefined}>
                 <Row option={O.mediaCache} hint={t('options.enableMediaCacheDesc')}>
                     <Toggle checked={mediaCacheEnabled} onChange={setMediaCacheEnabled} />
                 </Row>
@@ -76,6 +76,7 @@ const StoragePage: React.FC = () => {
                 <Row label={t('options.cachedSongsCount')}>
                     <Value>{mediaCount} · {cacheSizes.media}</Value>
                 </Row>
+                <AudioArchiveGroup />
             </Group>
 
             <Group
@@ -110,7 +111,6 @@ const StoragePage: React.FC = () => {
             </Group>
 
             <FolderWatchGroup />
-            <AudioArchiveGroup />
 
             <FoldedGroup def={BACKUP}>
                 <ConfigTransferRows />

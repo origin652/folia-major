@@ -72,7 +72,6 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     cacheDetails: { section: 'storage' },
     localLibraryWatch: { section: 'storage' },
     mediaCache: { section: 'storage' },
-    audioArchive: { section: 'storage' },
     r2Sync: { section: 'integration' },
 
     // pages/StoragePage (backup and import)

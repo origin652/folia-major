@@ -85,7 +85,10 @@ const createPlaybackStreams = ({ fetchFn = (...args) => globalThis.fetch(...args
     };
     const markPlayed = (id, ownerId) => { if (tickets.get(id) === ownerId) captures.get(id)?.played(); };
     const progress = (id, ownerId, seconds) => { if (tickets.get(id) === ownerId) captures.get(id)?.progress(seconds); };
-    const transfer = (id, ownerId) => tickets.get(id) === ownerId ? health.read(id) : null;
+    const transfer = (id, ownerId) => {
+        const status = tickets.get(id) === ownerId ? health.read(id) : null;
+        return status ? { ...status, input: bridge.getSourceInput(id) } : null;
+    };
     const probe = async (id, ownerId) => {
         if (tickets.get(id) !== ownerId) return { ready: false, retryable: false };
         const result = await health.probe(id);

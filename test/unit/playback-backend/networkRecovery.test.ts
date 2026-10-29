@@ -6,20 +6,22 @@ import type { PlaybackBackendDefinition, PlaybackBackendEvent } from '../../../s
 const setup = async () => {
     let report!: (event: PlaybackBackendEvent) => void;
     let failure: { code: string; retryable: boolean } | null = null;
+    let failureId = 0;
     const probe = vi.fn(async () => { failure = null; return { ready: true, retryable: true }; });
     const cancelProbe = vi.fn(async () => {});
     let actualPosition = 0, openedId = '';
-    const session = { open: vi.fn(async (source: { sourceId: string }) => { openedId = source.sourceId; actualPosition = 0; }),
+    const input = { requestId: 0, rangeReadId: 0, fullReadId: 0, seekable: true };
+    const session = { open: vi.fn(async (source: { sourceId: string }) => { openedId = source.sourceId; actualPosition = 0; input.requestId++; }),
         pause: vi.fn(async () => {}), play: vi.fn(async () => report({ type: 'status', status: {
             sourceId: openedId, state: 'playing', position: actualPosition, duration: 180,
-        } })), seek: vi.fn(async (seconds: number) => { actualPosition = seconds; }),
+        } })), seek: vi.fn(async (seconds: number) => { actualPosition = seconds; input.rangeReadId = input.requestId; }),
         setVolume: vi.fn(async () => {}), dispose: vi.fn(async () => {}) };
     const definition: PlaybackBackendDefinition = { name: 'Fake', capabilities: { seek: true, volume: true, http: true },
         create: callback => { report = callback; return session; } };
     const release = vi.fn(async () => {});
     const c = createBackendController(async (url, sourceId) => ({ source: { url, sourceId }, release, probe, cancelProbe,
         getError: async () => failure?.code ?? null,
-        getTransfer: async () => ({ receivedBytes: 8192, bytesPerSecond: 4096, failure }) }));
+        getTransfer: async () => ({ receivedBytes: 8192, bytesPerSecond: 4096, failure, failureId, input: { ...input } }) }));
     const events: PlaybackBackendEvent[] = [];
     c.subscribe(event => events.push(event));
     await c.setBackend(definition); await c.open('https://synthetic.test/audio'); await c.play();
@@ -27,10 +29,17 @@ const setup = async () => {
     report({ type: 'status', status: { sourceId: id, state: 'playing', position: 42, duration: 180 } });
     const interrupt = (retryable = true, type: 'ended' | 'error' = 'ended') => {
         failure = { code: 'SOURCE_UNREACHABLE', retryable };
+        failureId++;
         report({ type: 'status', status: { sourceId: id, state: 'stopped', position: 0, duration: 0 } });
         report(type === 'ended' ? { type, sourceId: id } : { type, sourceId: id, message: 'decoder read failed' });
     };
-    return { c, session, definition, report: (event: PlaybackBackendEvent) => report(event), id, probe, cancelProbe, interrupt, events, release };
+    const advance = async (position = actualPosition + 0.5) => {
+        await vi.advanceTimersByTimeAsync(500);
+        report({ type: 'status', status: { sourceId: c.getStatus().sourceId, state: 'playing', position, duration: 180 } });
+        for (let i = 0; i < 25; i++) await Promise.resolve();
+    };
+    return { c, session, definition, report: (event: PlaybackBackendEvent) => report(event), id, probe, cancelProbe, interrupt, events, release, advance, input,
+        failStream: () => { failure = { code: 'SOURCE_UNREACHABLE', retryable: true }; } };
 };
 const flush = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
 const controllers: Awaited<ReturnType<typeof setup>>[] = [];
@@ -42,6 +51,36 @@ afterEach(async () => {
 const tracked = async () => { const s = await setup(); controllers.push(s); return s; };
 
 describe('HTTP backend network recovery', () => {
+    it('does not retry a restore device error using a retained old response failure', async () => {
+        const s = await tracked();
+        s.probe.mockResolvedValue({ ready: true, retryable: true }); // A live retrying response still owns the old failure.
+        s.session.open.mockRejectedValueOnce(new Error('device refused'));
+        s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(15000);
+        expect(s.events.at(-1)).toMatchObject({ type: 'error', message: 'device refused' });
+        expect(s.probe).toHaveBeenCalledOnce();
+    });
+    it.each(['no-range', 'old-input'])('rejects an advancing target clock without new seekable input: %s', async mode => {
+        const s = await tracked();
+        s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(1000);
+        if (mode === 'no-range') { s.input.seekable = false; s.input.fullReadId = s.input.requestId; }
+        else s.input.rangeReadId = s.input.requestId - 1;
+        await s.advance();
+        expect(s.c.getStatus().state).toBe('loading');
+        await vi.advanceTimersByTimeAsync(8000);
+        expect(s.c.getStatus().state).toBe('paused');
+        expect(s.events.at(-1)).toMatchObject({ type: 'error', message: expect.stringContaining('resumed audio input') });
+    });
+    it('leaves a buffered, still-playing decoder alone during an upstream reconnect', async () => {
+        const s = await tracked();
+        s.probe.mockResolvedValue({ ready: false, retryable: true });
+        s.failStream();
+        // The byte bridge may be retrying, but a native playing report is not a stopped transport.
+        s.report({ type: 'status', status: { sourceId: s.id, state: 'playing', position: 43, duration: 180 } });
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(s.session.open).toHaveBeenCalledOnce();
+        expect(s.session.seek).not.toHaveBeenCalled();
+        expect(s.c.getStatus().state).toBe('playing');
+    });
     it('does not manufacture the requested position when the backend actually starts at zero', async () => {
         const s = await tracked();
         s.session.open.mockImplementationOnce(async source => {
@@ -67,7 +106,9 @@ describe('HTTP backend network recovery', () => {
             } }));
         });
         s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(1000);
-        expect(s.c.getStatus()).toMatchObject({ state: 'playing', position: 42.5 });
+        s.input.requestId++; s.input.rangeReadId = s.input.requestId;
+        await s.advance(43);
+        expect(s.c.getStatus()).toMatchObject({ state: 'playing', position: 43 });
     });
     it('pause cancels a pending position confirmation immediately without a late restart', async () => {
         const s = await tracked();
@@ -93,10 +134,11 @@ describe('HTTP backend network recovery', () => {
         expect(s.session.seek).toHaveBeenLastCalledWith(42);
         expect(s.session.setVolume).toHaveBeenLastCalledWith(0.2);
         expect(s.session.play).toHaveBeenCalledTimes(2);
+        await s.advance();
         expect(s.c.getStatus().state).toBe('playing');
         expect(s.c.getStatus().sourceId).not.toBe(s.id);
         s.report({ type: 'status', status: { sourceId: s.id, state: 'playing', position: 1, duration: 180 } });
-        expect(s.c.getStatus().position).toBe(42);
+        expect(s.c.getStatus().position).toBe(42.5);
         expect(s.events.filter(event => event.type !== 'status')).toEqual([]);
     });
     it('keeps waiting through failed network probes with bounded backoff', async () => {
@@ -161,6 +203,7 @@ describe('HTTP backend network recovery', () => {
         await s.c.open('https://synthetic.test/second'); await s.c.play(); await flush();
         expect(s.c.isWaitingForNetwork()).toBe(true);
         await vi.advanceTimersByTimeAsync(1000);
+        await s.advance();
         expect(s.c.getStatus().state).toBe('playing');
     });
     it('does not retry after a fatal probe response or for a backend without seek', async () => {

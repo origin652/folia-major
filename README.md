@@ -35,12 +35,15 @@ Lyrics Reimagined // 辞曲新境
 
 本分支 `personal/playback-backends` 是 [origin652/folia-major](https://github.com/origin652/folia-major/tree/personal/playback-backends) 的个人维护版，基于上游主线继续合并更新，不是官方发行版。
 
+当前 Windows x64 个人版为 **0.7.22-personal.0.11**，配套 **HQPlayer 模组 0.2.6**，见[发布页](https://github.com/origin652/folia-major/releases/tag/personal-playback-backends)和[本版更新说明](docs/releases/personal-0.7.22-personal.0.11.md)。主程序和模组需分别更新。
+
 - 保留主线的 Web Audio 和 mpv HiFi，在「设置 → 播放控制 → 播放引擎」统一选择；主线 mpv 仍只处理本地曲库和 Navidrome。
 - 保留通用 Folium 播放后端接口，以及独立的 [HQPlayer](extensions/hqplayer/README.md) 和 [Native Audio / SoXR](extensions/native-audio/README.md) 模组。启用模组不等于接管播放，需手动选择；模组选择仅在当前会话有效。
 - 切换引擎会暂停、释放旧输出并保留进度，不自动恢复发声。设备、独占和 DSP 由各后端管理，不同时叠加两条处理链；HQPlayer 故障不会自动换成其他后端。
 - 支持 HTTP 的播放模组可复用宿主统一鉴权媒体桥，按需流式读取 Omni 解析的音源；平台登录态留在宿主，模组仅接收可撤销的本机音源地址。文件型后端继续兼容完整暂存。
 - 支持 seek 的 HTTP 模组遇到明确网络断流会等待恢复并续播，不自动跳歌；暂停、切歌和换后端可取消。遥控小窗口显示缓冲转圈和实际音频下载速度；授权、设备和控制连接故障不做盲目重启，见[恢复边界](docs/playback-backends.md)。
 - 可选[已播放音频归档](docs/audio-archive.md)：默认关闭，HTTP 模组播放时收集完整原始文件，按平台、歌单和歌名保存。播放进度达 80% 后复用本次已存字节、后台补齐缺失区间，切歌后继续（需要相同强 ETag）；完整校验后可优先本地播放，不再请求该曲目的远端音频。试听、分段协议和无法确认完整性的数据不归档。
+- 设置中的普通缓存与长期归档合并为「音频缓存与归档」栏目；开关与目录仍独立，清理缓存不删除归档。HQPlayer 控制连接中断时可只读重连并同步真实状态，不重启程序、不重载正在播放的歌曲。
 - 模组源码与主程序分开维护。打包命令及限制见各自 README，接口说明见 [播放后端文档](docs/playback-backends.md)。HQPlayer 需自行安装；真实 SDM 输出尚未验证。
 
 > **个人版更新：** 本分支新增「设置 → 通用 → 更新检查」的**检查更新**和**立即更新**，更新源固定为本仓库 `personal/playback-backends` 的个人构建，不使用官方发行通道或网盘。Windows 下载完成后点击「重启安装」；macOS / Linux 提供完整安装包入口。需先手动安装一次带此功能的新安装包，推送源码不会改变已安装的旧程序；未发布安装包时会显示暂无更新包。分支发布说明见 [个人版更新](docs/personal-updates.md)。

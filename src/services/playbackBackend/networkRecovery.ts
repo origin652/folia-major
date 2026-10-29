@@ -64,6 +64,8 @@ export const createNetworkRecovery = (callbacks: {
                     delay = Math.min(delay * 2, 10000);
                     continue;
                 }
+                const failureBefore = (await currentSource.getTransfer?.())?.failureId;
+                if (!current()) return;
                 restoring = true;
                 restoreError = null;
                 try {
@@ -77,7 +79,8 @@ export const createNetworkRecovery = (callbacks: {
                     if (!current()) return;
                     const transfer = await currentSource.getTransfer?.();
                     if (!current()) return;
-                    if (!transfer?.failure?.retryable) throw error;
+                    // A still-open old response may retain its failure; it cannot turn a new seek/device error into endless retries.
+                    if (!transfer?.failure?.retryable || failureBefore !== undefined && transfer.failureId === failureBefore) throw error;
                 } finally { if (token === epoch) restoring = false; }
                 delay = Math.min(delay * 2, 10000);
             }

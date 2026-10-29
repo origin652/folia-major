@@ -42,6 +42,23 @@ const setup = (overrides = {}, options = {}) => {
 const source = { sourceId: 'one', filePath: '/host/source.audio' };
 
 describe('HQPlayer engine', () => {
+    it('refuses an unsafe HTTP resume before starting a new URI', async () => {
+        const assertSeekable = vi.fn(async () => { throw new Error('Unverified HTTP seek'); });
+        const s = setup({}, { prepare: async () => ({ uri: 'http://127.0.0.1/isolated', release: async () => {}, assertSeekable }) });
+        await s.engine.open(source); await s.engine.seek(4);
+        s.connection.request.mockClear();
+        await expect(s.engine.play()).rejects.toThrow('Unverified HTTP seek');
+        expect(s.connection.request.mock.calls.some(([name]) => ['PlayNextURI', 'Play', 'Seek'].includes(name))).toBe(false);
+        expect(s.state.state).toBe(0);
+    });
+    it('pauses its own running output if a direct HTTP seek becomes unsafe', async () => {
+        const s = setup({}, { prepare: async () => ({ uri: 'http://127.0.0.1/isolated', release: async () => {},
+            assertSeekable: async () => { throw new Error('Unverified HTTP seek'); } }) });
+        await s.engine.open(source); await s.engine.play();
+        await expect(s.engine.seek(4)).rejects.toThrow('Unverified HTTP seek');
+        expect(s.state.state).toBe(1);
+        expect(s.connection.request.mock.calls.some(([name]) => name === 'Seek')).toBe(false);
+    });
     it('reads DSP without starting or stopping output and reuses the validated active connection', async () => {
         const s = setup();
         addDspFixture(s.connection);

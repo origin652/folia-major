@@ -4,18 +4,18 @@ import { isAudioArchiveSupported } from '../../../../../services/audioArchive/us
 
 // src/components/modal/settings/pages/storage/options.ts
 // The groups and options of the 存储与备份 page, declared apart from the page so the files that
-// draw its rows name the same ones. The four group ids are the ids other code opens the settings on.
+// draw its rows name the same ones. Cache and persistent archive share one audio settings group.
 
-export const MEDIA: SettingsGroupDef = { id: 'mediaCache', titleKey: 'options.mediaCache' };
+export const MEDIA: SettingsGroupDef = { id: 'mediaCache', titleKey: 'options.audioStorage' };
 export const CACHES: SettingsGroupDef = { id: 'cacheDetails', titleKey: 'options.cacheDetails' };
 // Drawn only where the browser can watch a folder (FolderWatchGroup).
 export const WATCH: SettingsGroupDef = { id: 'localLibraryWatch', titleKey: 'options.localLibraryWatch', available: isLocalLibraryAutoScanSupported };
 export const BACKUP: SettingsGroupDef = { id: 'importExportTitle', titleKey: 'options.importExportTitle' };
-export const ARCHIVE: SettingsGroupDef = { id: 'audioArchive', titleKey: 'audioArchive.title', electronOnly: true, available: isAudioArchiveSupported };
+const archiveAvailability = { electronOnly: true, available: isAudioArchiveSupported };
 export const ARCHIVE_OPTIONS = {
-    enabled: option(ARCHIVE, 'audioArchiveEnabled', 'audioArchive.enabled'),
-    directory: option(ARCHIVE, 'audioArchiveDirectory', 'audioArchive.directory'),
-    preferLocal: option(ARCHIVE, 'audioArchivePreferLocal', 'audioArchive.preferLocal'),
+    enabled: option(MEDIA, 'audioArchiveEnabled', 'audioArchive.enabled', archiveAvailability),
+    directory: option(MEDIA, 'audioArchiveDirectory', 'audioArchive.directory', archiveAvailability),
+    preferLocal: option(MEDIA, 'audioArchivePreferLocal', 'audioArchive.preferLocal', archiveAvailability),
 };
 
 /** What the app keeps on disk, one row each, in the order they are drawn. */

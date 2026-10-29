@@ -12,6 +12,7 @@ class HqConnection {
         this.pending = null;
         this.buffer = '';
         this.closed = false;
+        this.closeReason = null;
         this.socket = connect({ host: config.host, port: config.port });
         this.socket.setEncoding('utf8');
         this.ready = new Promise((resolve, reject) => {
@@ -49,12 +50,12 @@ class HqConnection {
         catch (error) { pending.reject(error); this.fail(error); }
     }
 
-    request(name, attributes) {
+    request(name, attributes, timeoutMs = this.timeoutMs) {
         const result = this.work.then(async () => {
             await this.ready;
-            if (this.closed) throw new Error('HQPlayer connection is closed');
+            if (this.closed) throw this.closeReason;
             return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => this.fail(new Error(`HQPlayer ${name} timed out; output state is unknown`)), this.timeoutMs);
+                const timer = setTimeout(() => this.fail(new Error(`HQPlayer ${name} timed out; output state is unknown`)), timeoutMs);
                 this.pending = { name, resolve, reject, timer };
                 this.socket.write(commandXml(name, attributes), error => { if (error) this.socketError(error); });
             });
@@ -66,6 +67,7 @@ class HqConnection {
     fail(error) {
         if (this.closed) return;
         this.closed = true;
+        this.closeReason = error;
         clearTimeout(this.connectTimer);
         this.rejectConnect(error);
         if (this.pending) {

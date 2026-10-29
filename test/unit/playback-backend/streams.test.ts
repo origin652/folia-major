@@ -84,7 +84,7 @@ describe('authenticated playback stream leases', () => {
         expect(await head.text()).toBe('');
         expect(fetchFn.mock.calls[1][1].method).toBe('HEAD');
         store.release(lease.id, 8);
-        expect((await fetch(lease.url, { method: 'HEAD' })).status).toBe(206);
+        expect((await fetch(lease.url, { method: 'HEAD', headers: { Range: 'bytes=3-6' } })).status).toBe(206);
         store.release(lease.id, 7);
         expect((await fetch(lease.url)).status).toBe(404);
     });

@@ -5,10 +5,10 @@ const { networkFailure, retryableStatus } = require('../hifi/networkFailure.cjs'
 // Owner-scoped transfer counters and cancellable one-byte readiness checks; never return media URLs.
 const createStreamHealth = ({ fetchFn, now = Date.now, probeTimeoutMs = 8000 }) => {
     const entries = new Map();
-    const add = (id, url) => entries.set(id, { url, bytes: 0, chunks: [], failure: null, probe: null });
+    const add = (id, url) => entries.set(id, { url, bytes: 0, chunks: [], failure: null, failureId: 0, probe: null });
     const cancel = id => entries.get(id)?.probe?.abort();
     const remove = id => { cancel(id); entries.delete(id); };
-    const fail = (id, failure) => { const entry = entries.get(id); if (entry) entry.failure = failure; };
+    const fail = (id, failure) => { const entry = entries.get(id); if (entry) { entry.failure = failure; entry.failureId++; } };
     const clear = id => { const entry = entries.get(id); if (entry) entry.failure = null; };
     const observe = id => ({
         write: chunk => {
@@ -29,7 +29,7 @@ const createStreamHealth = ({ fetchFn, now = Date.now, probeTimeoutMs = 8000 }) 
         if (!entry) return null;
         entry.chunks = entry.chunks.filter(item => item.at > now() - 2000);
         return { receivedBytes: entry.bytes, bytesPerSecond: entry.chunks.reduce((sum, item) => sum + item.bytes, 0) / 2,
-            failure: entry.failure ? { ...entry.failure } : null };
+            failure: entry.failure ? { ...entry.failure } : null, failureId: entry.failureId };
     };
     const probe = async id => {
         const entry = entries.get(id);

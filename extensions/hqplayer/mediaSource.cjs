@@ -7,7 +7,7 @@ const { fileTypeFromFile } = require('file-type/node');
 // Open only a host loopback lease or a recognized staged copy; never authenticate with a music provider here.
 
 const EXTENSIONS = new Set(['flac', 'wav', 'aif', 'aiff', 'mp3', 'm4a', 'mp4', 'ogg', 'opus', 'wv', 'dsf', 'dff', 'ape', 'caf']);
-const stageHqpSource = async (source, cache) => {
+const stageHqpSource = async (source, cache, fetchFn = (...args) => globalThis.fetch(...args)) => {
     if (source?.sourceId && typeof source.url === 'string') {
         let url;
         try { url = new URL(source.url); } catch { url = null; }
@@ -15,7 +15,17 @@ const stageHqpSource = async (source, cache) => {
             || url.username || url.password || url.search || url.hash || !/^\/[a-f0-9]{32}\/audio(?:\.[a-z0-9]+)?$/.test(url.pathname)) {
             throw new Error('HQPlayer requires a host-owned loopback stream; update Folia or turn off streaming and reload the track');
         }
-        return { uri: source.url, release: async () => {} };
+        return { uri: source.url, release: async () => {}, assertSeekable: async seconds => {
+            if (seconds < 1) return;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
+            try {
+                const response = await fetchFn(source.url, { method: 'HEAD', credentials: 'omit', redirect: 'error', signal: controller.signal });
+                if (!response.ok || response.headers.get('accept-ranges') !== 'bytes') {
+                    throw new Error('HQPlayer HTTP seek requires verified byte-range support; playback remains paused. Update Folia or disable streaming and reload.');
+                }
+            } finally { clearTimeout(timer); }
+        } };
     }
     if (!source?.sourceId || typeof source.filePath !== 'string' || !path.isAbsolute(source.filePath)) {
         throw new Error('HQPlayer requires a host-staged local file; remote HQPlayer servers are not supported');

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Recognize opaque staging bytes with the bundled library, retaining exact PCM24 bytes and bounded ownership.
 const require = createRequire(import.meta.url);
@@ -11,6 +11,21 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe('HQPlayer source copies', () => {
+    it('checks verified range support only for a nonzero native HTTP seek', async () => {
+        const fetchFn = vi.fn(async () => new Response(null, { headers: { 'Accept-Ranges': 'bytes' } }));
+        const url = `http://127.0.0.1:12345/${'b'.repeat(32)}/audio`;
+        const prepared = await stageHqpSource({ sourceId: 'stream', url }, '/unused', fetchFn);
+        expect(fetchFn).not.toHaveBeenCalled();
+        await prepared.assertSeekable(0);
+        expect(fetchFn).not.toHaveBeenCalled();
+        await prepared.assertSeekable(42);
+        expect(fetchFn).toHaveBeenCalledWith(url, expect.objectContaining({ method: 'HEAD', credentials: 'omit', redirect: 'error' }));
+    });
+    it.each([200, 403])('refuses nonzero HTTP seek without a verified host response (%s)', async status => {
+        const url = `http://127.0.0.1:12345/${'b'.repeat(32)}/audio`;
+        const prepared = await stageHqpSource({ sourceId: 'stream', url }, '/unused', async () => new Response(null, { status }));
+        await expect(prepared.assertSeekable(42)).rejects.toThrow('verified byte-range support');
+    });
     it('adds a recognized suffix without changing bytes and releases only its own copy', async () => {
         const root = await mkdtemp(path.join(tmpdir(), 'folia-hqp-unit-'));
         roots.push(root);

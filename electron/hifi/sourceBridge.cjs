@@ -1,23 +1,15 @@
 'use strict';
 
 const { randomBytes: cryptoRandomBytes } = require('crypto');
-const { Readable, pipeline } = require('stream');
 const { inspect } = require('util');
 const { createHifiError, sanitizeDetail } = require('./hifiErrors.cjs');
-const { networkFailure, retryableStatus } = require('./networkFailure.cjs');
+const { serveRemote: serveRemoteBytes } = require('./remoteSource/serve.cjs');
+const { createInputEvidence } = require('./remoteSource/reads.cjs');
 
 // 只听 127.0.0.1 的来源桥：mpv 凭随机令牌取音频，本地 File 按块向渲染端要，Navidrome 由主进程 fetch 后转给 mpv。
 
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 const TOKEN_PATTERN = /^\/([a-f0-9]{32})(?:\/|$)/;
-// Navidrome 出错时常回 200 加 Subsonic 的 JSON / XML 错误体，代理或登录页回 HTML：都不是音频。
-const REJECTED_CONTENT_TYPE = /json|xml|html/i;
-const FORWARDED_REMOTE_HEADERS = [
-    ['content-type', 'Content-Type'],
-    ['content-length', 'Content-Length'],
-    ['content-range', 'Content-Range'],
-    ['accept-ranges', 'Accept-Ranges'],
-];
 // 只认可见 ASCII 的 MIME，渲染端传来的值不合规时 setHeader 会抛错。
 const SAFE_MIME_TYPE = /^[\x21-\x7e][\x20-\x7e]{0,254}$/;
 // Subsonic credentials and common signed-media keys; ordinary client/version parameters are not secrets.
@@ -67,14 +59,6 @@ const sendEmpty = (res, status, headers = {}) => {
     res.end();
 };
 
-const cancelBody = response => {
-    try {
-        response?.body?.cancel().catch(() => {});
-    } catch {
-        // body 已被读过或已锁住，没有可释放的
-    }
-};
-
 const credentialFragments = url => {
     try {
         const parsed = new URL(url);
@@ -113,6 +97,10 @@ function createSourceBridge(options = {}) {
         observeRemoteResponse,
         onRemoteFailure,
         onRemoteComplete,
+        remoteRetryDelayMs,
+        remoteRetryWindowMs,
+        remoteReadTimeoutMs,
+        remoteProbeTimeoutMs,
         now = () => Date.now(),
         setTimeoutFn = (callback, ms) => setTimeout(callback, ms),
     } = options;
@@ -176,7 +164,7 @@ function createSourceBridge(options = {}) {
             throw createHifiError('INVALID_REQUEST', 'remote source URL must use an allowed protocol (http or https by default)');
         }
         const listeningPort = requirePort();
-        const token = allocateToken({ kind: 'remote', url: parsed.href, host: parsed.host });
+        const token = allocateToken({ kind: 'remote', url: parsed.href, host: parsed.host, input: createInputEvidence() });
         logInfo(`[HiFi] bridge registered remote ${tokenLabel(token)} host=${parsed.host}`);
         return { token, url: buildUrl(listeningPort, token, fileName) };
     };
@@ -198,13 +186,14 @@ function createSourceBridge(options = {}) {
 
     // 令牌还登记着时才记错：撤销后的断流是我们自己断的，不算源的错。
     const recordError = (token, entry, code, retryable = false) => {
-        if (sources.get(token) === entry && !sourceErrors.has(token)) sourceErrors.set(token, code);
+        if (sources.get(token) === entry && (!sourceErrors.has(token) || code === 'SOURCE_REJECTED')) sourceErrors.set(token, code);
         if (sources.get(token) === entry && entry.kind === 'remote') onRemoteFailure?.(token, { code, retryable });
     };
 
     // 同一个令牌后来有一次请求把它要的范围完整送到了（mpv 重连成功）：之前记的错作废，
     // 免得会话把一次已经恢复的断流当成这首歌放完时、或之后不相干的出错时的原因。
     const clearError = (token, entry) => {
+        if (entry.failedTransfers?.size) return;
         if (sources.get(token) === entry && entry.kind === 'remote') onRemoteComplete?.(token);
         if (sources.get(token) === entry && sourceErrors.delete(token)) {
             logInfo(`[HiFi] bridge ${tokenLabel(token)} served a full request again, dropping the earlier error`);
@@ -317,73 +306,16 @@ function createSourceBridge(options = {}) {
     const serveRemote = async (token, entry, req, res) => {
         const label = tokenLabel(token);
         const controller = new AbortController();
-        const connection = watchConnection(token, res, () => controller.abort());
-        const headers = {};
-        if (typeof req.headers.range === 'string') headers.Range = req.headers.range;
-        let upstream;
-        try {
-            upstream = await fetchFn(entry.url, { method: req.method, headers, redirect: 'follow', credentials: 'omit', signal: controller.signal });
-        } catch (error) {
-            if (connection.closed) return;
-            recordError(token, entry, 'SOURCE_UNREACHABLE', networkFailure(error));
-            logWarn(`[HiFi] bridge ${label} fetch from ${entry.host} failed`, redactRemoteError(error, entry.url));
-            sendEmpty(res, 502);
-            return;
-        }
-        if (connection.closed) {
-            cancelBody(upstream);
-            return;
-        }
-        const contentType = upstream.headers.get('content-type') || '';
-        if (upstream.status >= 400) {
-            cancelBody(upstream);
-            recordError(token, entry, 'SOURCE_UNREACHABLE', retryableStatus(upstream.status));
-            logWarn(`[HiFi] bridge ${label} ${entry.host} answered ${upstream.status}`);
-            sendEmpty(res, upstream.status);
-            return;
-        }
-        if (REJECTED_CONTENT_TYPE.test(contentType)) {
-            cancelBody(upstream);
-            recordError(token, entry, 'SOURCE_REJECTED');
-            logWarn(`[HiFi] bridge ${label} ${entry.host} answered ${upstream.status} with ${contentType}, not audio`);
-            sendEmpty(res, 502);
-            return;
-        }
-        const forwarded = {};
-        for (const [name, header] of FORWARDED_REMOTE_HEADERS) {
-            const value = upstream.headers.get(name);
-            if (value !== null) forwarded[header] = value;
-        }
-        // fetch 已经解了压缩，上游的长度对不上解出来的字节，改走分块。
-        const encoding = upstream.headers.get('content-encoding');
-        if (encoding && encoding.toLowerCase() !== 'identity') delete forwarded['Content-Length'];
-        res.writeHead(upstream.status, forwarded);
-        if (req.method === 'HEAD' || !upstream.body) {
-            cancelBody(upstream);
-            res.end();
-            return;
-        }
-        const body = Readable.fromWeb(upstream.body);
-        // Optional archive observers copy bounded chunks asynchronously; their failures must not interrupt playback.
-        let observer = null;
-        try { observer = observeRemoteResponse?.(token, upstream); }
-        catch (error) { logWarn('[HiFi] archive observer could not start', error); }
-        if (observer) body.on('data', chunk => {
-            try { observer.write(chunk); } catch { observer = null; }
+        watchConnection(token, res, () => controller.abort());
+        await serveRemoteBytes({ entry, req, res, signal: controller.signal, fetchFn, parseRange: parseRangeHeader,
+            retryDelayMs: remoteRetryDelayMs, retryWindowMs: remoteRetryWindowMs,
+            readTimeoutMs: remoteReadTimeoutMs, probeTimeoutMs: remoteProbeTimeoutMs,
+            observe: response => observeRemoteResponse?.(token, response),
+            onRead: entry.input.open,
+            fail: (code, retryable) => recordError(token, entry, code, retryable),
+            complete: () => clearError(token, entry),
+            log: error => logWarn(`[HiFi] bridge ${label} stream from ${entry.host} interrupted`, redactRemoteError(error, entry.url)),
         });
-        let upstreamError = null;
-        // mpv 断开时 pipeline 也会让 body 报错，那时 connection 已经 closed，不算上游的错。
-        body.once('error', error => {
-            if (!connection.closed) upstreamError = error;
-        });
-        const pipeError = await new Promise(resolve => pipeline(body, res, error => resolve(error ?? null)));
-        try { observer?.end(!pipeError && res.writableFinished); } catch { /* Playback is independent of archiving. */ }
-        if (upstreamError) {
-            recordError(token, entry, 'SOURCE_UNREACHABLE', networkFailure(upstreamError));
-            logWarn(`[HiFi] bridge ${label} stream from ${entry.host} broke off`, redactRemoteError(upstreamError, entry.url));
-            return;
-        }
-        if (!pipeError && res.writableFinished) clearError(token, entry);
     };
 
     const handleRequest = (req, res) => {
@@ -457,6 +389,7 @@ function createSourceBridge(options = {}) {
         revoke,
         revokeAll,
         getSourceError,
+        getSourceInput: token => sources.get(token)?.input?.read() ?? null,
         clearSourceError: token => { const entry = sources.get(token); if (entry) clearError(token, entry); },
     };
 }

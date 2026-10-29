@@ -6,11 +6,12 @@ const { normalizeConfig, decodeStatus, decodeVolumeRange, volumeTarget } = requi
 const { ensureHqplayer } = require('./launcher.cjs');
 const { readDsp, planDsp, applyDsp } = require('./dsp.cjs');
 const { confirmResumeSeek } = require('./resumeSeek.cjs');
+const { recoverControl } = require('./controlRecovery.cjs');
 
 // Owns one local HQPlayer URI transport, not the process, license, filters or device configuration.
 
 const createHqpEngine = (report, cache, { connect = config => new HqConnection(config), prepare = stageHqpSource,
-    ensureRunning = ensureHqplayer, pollMs = 500 } = {}) => {
+    ensureRunning = ensureHqplayer, pollMs = 500, controlRecoveryMs = 30000 } = {}) => {
     let config = normalizeConfig();
     let connection = null;
     let source = null;
@@ -28,6 +29,9 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
     let transitionSince = null;
     let playing = false;
     let timer = null;
+    let revision = 0;
+    let recovering = null;
+    const cancelRecovery = () => { revision++; clearTimeout(timer); recovering?.abort(); };
     const retiredMedia = new Set();
     let work = Promise.resolve();
     const enqueue = action => {
@@ -35,7 +39,8 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
         work = result.catch(() => {});
         return result;
     };
-    const request = (name, attrs) => connection.request(name, attrs);
+    const request = (name, attrs) => name === 'Seek' && source?.url
+        ? connection.request(name, attrs, 30000) : connection.request(name, attrs);
     const readStatus = async () => decodeStatus(await request('Status', { subscribe: 0 }));
     const pauseOutput = async () => {
         // Do not send a pause toggle to an already paused/stopped external player.
@@ -47,11 +52,22 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
         }
         throw new Error('HQPlayer did not pause; confirm output is stopped in HQPlayer');
     };
+    const checkSeekable = async seconds => {
+        try { await media.assertSeekable?.(seconds); }
+        catch (error) {
+            try {
+                if (stillOwns(await readStatus())) await pauseOutput();
+                else owned = false;
+            } catch (pauseError) { console.warn('[HQPlayer] Could not pause after refused HTTP seek', pauseError); }
+            throw error;
+        }
+    };
     const statusEvent = status => {
         if (source) report({ type: 'status', status: { sourceId: source.sourceId, state: status.state, position: status.position, duration: status.duration } });
         // No output.exclusiveActive claim: this API does not prove exclusive device access.
     };
     const fail = error => {
+        if (error.code === 'HQP_CANCELLED') return;
         clearTimeout(timer);
         timer = null;
         playing = false;
@@ -107,8 +123,40 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             }
         }
     };
+    const restoreControl = async (token, publish = true) => {
+        if (!owned || !loaded || !media || token !== revision) throw Object.assign(new Error('HQPlayer control recovery cancelled'), { code: 'HQP_CANCELLED' });
+        const abort = new AbortController();
+        recovering = abort;
+        if (publish) statusEvent({ ...previous, state: 'loading' });
+        console.warn('[HQPlayer] Control connection lost; verifying the existing audio input', connection.closeReason);
+        try {
+            const restored = await recoverControl({ connect, config, uri: media.uri, trackId,
+                signal: abort.signal, timeoutMs: controlRecoveryMs });
+            if (token !== revision || abort.signal.aborted) {
+                restored.connection.close();
+                throw Object.assign(new Error('HQPlayer control recovery cancelled'), { code: 'HQP_CANCELLED' });
+            }
+            connection = restored.connection;
+            previous = restored.status;
+            playing = previous.state === 'playing';
+            transitionSince = null;
+            if (publish) statusEvent(previous);
+            console.info('[HQPlayer] Control reconnected to the same source', { state: previous.state });
+            return previous;
+        } catch (error) {
+            if (error.code === 'HQP_OWNERSHIP') { owned = false; loaded = false; }
+            throw error;
+        } finally { if (recovering === abort) recovering = null; }
+    };
     const poll = async () => {
-        const status = await readStatus();
+        const token = revision;
+        let status;
+        try { status = await readStatus(); }
+        catch (error) {
+            if (!connection?.closed) throw error;
+            status = await restoreControl(token);
+        }
+        if (token !== revision) return;
         if (!stillOwns(status)) {
             // Another controller took over. Do not stop or clear its playlist.
             owned = false;
@@ -141,6 +189,8 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             }
         }
         const ended = stopped && (nearEnd || config.earlyStopAsEnded);
+        if (status.state === 'playing') playing = true;
+        else if (status.state === 'paused') playing = false;
         statusEvent(status);
         previous = status;
         if (ended) {
@@ -153,8 +203,11 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
     };
     const schedule = () => {
         clearTimeout(timer);
+        const token = revision;
         timer = setTimeout(() => {
-            void enqueue(poll).then(() => { if (source && owned && loaded) schedule(); }, fail);
+            void enqueue(() => token === revision ? poll() : undefined).then(() => {
+                if (token === revision && source && owned && loaded) schedule();
+            }, error => { if (token === revision) fail(error); });
         }, pollMs);
         timer.unref?.();
     };
@@ -202,10 +255,26 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
         const actual = await readStatus();
         if (Math.abs(actual.volumeDb - target) > 0.15) throw new Error('HQPlayer did not accept the requested volume; playback remains paused');
     };
-    const run = action => enqueue(async () => {
-        try { return await action(); }
-        catch (error) { fail(error); throw error; }
+    const run = (action, publishRecovery = true) => enqueue(async () => {
+        const token = revision;
+        let attemptedRecovery = false;
+        try {
+            if (connection?.closed && owned && loaded) {
+                attemptedRecovery = true;
+                await restoreControl(token, publishRecovery);
+                schedule();
+            }
+            return await action();
+        } catch (error) {
+            // The timed-out setter may already have executed. Reconcile, but never replay it.
+            if (!attemptedRecovery && connection?.closed && owned && loaded && error.code !== 'HQP_CANCELLED' && token === revision) {
+                try { await restoreControl(token); schedule(); }
+                catch (recoveryError) { fail(recoveryError); }
+            } else if (token === revision) fail(error);
+            throw error;
+        }
     });
+    const replace = action => { cancelRecovery(); return run(action, false); };
     const withDspConnection = async (values, action) => {
         const target = normalizeConfig(values);
         if (connection && !connection.closed) {
@@ -251,13 +320,13 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             }
             return applyDsp(control, snapshot, changes);
         })),
-        configure: values => run(async () => {
+        configure: values => replace(async () => {
             const next = normalizeConfig(values);
             await cleanup();
             config = next;
             volumeBlocked = false;
         }),
-        open: next => run(async () => {
+        open: next => replace(async () => {
             clearTimeout(timer);
             volumeBlocked = true;
             if (!connection || connection.closed) {
@@ -325,6 +394,8 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             retireEmptyTransport(before);
             await applyVolume();
             const wasLoaded = loaded;
+            // Check before PlayNextURI: a refused resume must not briefly start the file at zero.
+            if (pendingSeek !== null) await checkSeekable(pendingSeek);
             if (!loaded) {
                 // Match the working official --play-next-uri path; PlaylistAdd can terminate HQPlayer 6 here.
                 await request('PlayNextURI', { value: media.uri, freewheel: 0 });
@@ -367,6 +438,7 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
                 statusEvent(previous);
                 return;
             }
+            await checkSeekable(seconds);
             await request('Seek', { position: Math.floor(seconds) });
             await poll();
         }),
@@ -383,7 +455,7 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
                 throw error;
             }
         }),
-        dispose: () => enqueue(cleanup),
+        dispose: () => { cancelRecovery(); return enqueue(cleanup); },
     };
 };
 

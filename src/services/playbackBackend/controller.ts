@@ -47,6 +47,8 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 await active.pause();
                 if (!valid()) return;
                 recovery.checkRestore();
+                const inputBefore = (await source.getTransfer?.())?.input?.requestId;
+                if (!valid()) return;
                 // A reopened transport gets a new identity: late reports from the interrupted one cannot rewind it.
                 sourceId = `source-${generation}-${++revision}`;
                 resumeStatus = status = { ...status, sourceId };
@@ -64,7 +66,13 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                     await active.play();
                     if (!valid()) { if (active === session && !wantsPlay) await active.pause(); return; }
                     recovery.checkRestore();
-                    const confirmed = await resumeConfirmation.wait(valid);
+                    const confirmed = await resumeConfirmation.wait(valid, async () => {
+                        if (position < 1) return true;
+                        const input = (await source.getTransfer?.())?.input;
+                        // A fresh nonzero range read (or a complete new input) must back the native seek clock.
+                        return inputBefore !== undefined && Boolean(input?.seekable
+                            && (input.fullReadId > inputBefore || input.rangeReadId > inputBefore));
+                    });
                     if (confirmed && valid()) {
                         recovery.checkRestore();
                         deliver({ type: 'status', status: confirmed }, generation);

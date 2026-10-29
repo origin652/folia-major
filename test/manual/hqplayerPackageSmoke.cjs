@@ -8,6 +8,7 @@ const { Module, builtinModules } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { unzipSync, strFromU8 } = require('fflate');
 const { parseResponse, commandXml } = require('../../extensions/hqplayer/protocol.cjs');
+const { createSourceBridge } = require('../../electron/hifi/sourceBridge.cjs');
 
 // Runs the delivered main/client/clock with a local protocol simulator, not the user's player.
 
@@ -24,6 +25,8 @@ const run = async () => {
     let state = 0, position = 0, volume = -30, tracks = 0;
     let serial = 0;
     let streamedUri = null;
+    let activeUri = '';
+    const requests = [];
     let stopping = 0, pausing = 0;
     let resumeSeeksToIgnore = 0, requirePausedSeek = false;
     const dsp = { mode: 0, filter: 0, filter1x: 0, filterNx: 0, shaper: 0, rate: 0 };
@@ -46,6 +49,7 @@ const run = async () => {
                 const xml = buffer.slice(0, index);
                 buffer = buffer.slice(index + 1);
                 const name = xml.match(/<([A-Z][A-Za-z]+)\b/)[1];
+                requests.push(name);
                 const request = parseResponse(xml, name);
                 let attrs = { result: 'OK' };
                 if (name === 'GetInfo') attrs = { product: 'Signalyst HQPlayer Desktop', version: '6', engine: 'test' };
@@ -56,8 +60,9 @@ const run = async () => {
                     assert.equal(request.getAttribute('freewheel'), '0');
                     tracks = 1; serial++; state = 2; position = 0;
                     const uri = request.getAttribute('value');
+                    activeUri = uri;
                     if (uri.startsWith('http:')) {
-                        assert.match(uri, /^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{32}\/audio\.flac$/);
+                        assert.match(uri, /^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{32}\/audio\.wav$/);
                         streamedUri = uri;
                     } else {
                         assert(path.isAbsolute(uri));
@@ -82,6 +87,11 @@ const run = async () => {
                     attrs = { state, position, length: state === 3 ? 0 : 8, volume, tracks_total: tracks, track_id: `track-${serial}`, repeat: 0, random: 0 };
                 }
                 if (name in lists) { socket.write(`<${name}>${lists[name]}</${name}>\n`); continue; }
+                if (name === 'PlaylistGet') {
+                    const item = commandXml('PlaylistItem', { uri: activeUri }).replace(/<\?xml[^?]*\?>/, '').trim();
+                    socket.write(`<PlaylistGet>${item}</PlaylistGet>\n`);
+                    continue;
+                }
                 socket.write(commandXml(name, attrs));
             }
         });
@@ -93,6 +103,7 @@ const run = async () => {
     const events = [];
     const shown = [];
     let session;
+    let mediaBridge;
     let cleanup;
     entry.exports({
         storage: { paths: { cache } },
@@ -179,10 +190,26 @@ const run = async () => {
             }
         }
         assert.equal(backend.capabilities.http, true);
-        const hostUri = `http://127.0.0.1:12345/${'a'.repeat(32)}/audio.flac`;
+        mediaBridge = createSourceBridge({ logInfo() {}, logWarn: console.warn,
+            requestRead: async (_owner, { offset, length }) => ({ status: 'ok', data: wave.subarray(offset, offset + length) }) });
+        await mediaBridge.start();
+        const { url: hostUri } = mediaBridge.registerLocal({ sourceKey: 'synthetic', ownerId: 7,
+            fileName: 'audio.wav', size: wave.length, mimeType: 'audio/wav' });
         await session.open({ sourceId: 'stream-check', url: hostUri });
         await session.play();
         assert.equal(streamedUri, hostUri, 'The standalone package must pass only the host lease to HQPlayer');
+        const recoveryEvents = shown.length;
+        const recoveryRequests = requests.length;
+        sockets.forEach(socket => socket.destroy());
+        const recoveryDeadline = Date.now() + 5000;
+        while (!shown.slice(recoveryEvents).some(event => event.status?.sourceId === 'stream-check' && event.status.state === 'playing')) {
+            assert(Date.now() < recoveryDeadline, 'A new control connection must reconcile the existing source');
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        assert(shown.slice(recoveryEvents).some(event => event.status?.state === 'loading'));
+        assert(!shown.slice(recoveryEvents).some(event => event.type === 'error' || event.type === 'ended'));
+        assert(requests.slice(recoveryRequests).includes('PlaylistGet'));
+        assert(requests.slice(recoveryRequests).every(name => ['GetInfo', 'Status', 'PlaylistGet'].includes(name)), 'Control recovery must not replay a setter or reload audio');
         await session.pause();
         await session.seek(4);
         await session.play();
@@ -204,10 +231,11 @@ const run = async () => {
         assert.equal(tracks, 0);
         assert(events.some(event => event.status?.sourceId === 'one' && event.status.state === 'playing'));
         assert(shown.some(event => event.status?.sourceId === 'one' && event.status.state === 'playing'));
-        console.log('[HQPlayerPackageSmoke] ZIP main + client + clock + DSP settings, TCP/XML, asynchronous Pause/STOPREQ, five EOF transitions including an early stop, host stream URI/pause/seek, explicit DSP apply, PCM24, mute and disposal passed.');
+        console.log('[HQPlayerPackageSmoke] ZIP main + client + clock + DSP settings, TCP/XML, asynchronous Pause/STOPREQ, five EOF transitions including an early stop, read-only control reconnection, host stream URI/pause/seek, explicit DSP apply, PCM24, mute and disposal passed.');
     } finally {
         try { if (session) await session.dispose(); }
         finally {
+            await mediaBridge?.stop();
             await cleanup();
             sockets.forEach(socket => socket.destroy());
             await new Promise(resolve => server.close(resolve));

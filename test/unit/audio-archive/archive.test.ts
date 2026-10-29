@@ -52,6 +52,35 @@ afterEach(async () => {
 });
 
 describe('played audio archive', () => {
+    it('merges an interrupted playback prefix and validated continuation without archiving the probe', async () => {
+        const { archive, root } = await setup(); const data = wav();
+        let interrupt!: () => void;
+        const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+            const range = (init.headers as Record<string, string>).Range;
+            const start = range ? Number(/bytes=(\d+)/.exec(range)![1]) : 0;
+            const end = range ? Number(/-(\d+)$/.exec(range)![1]) + 1 : data.length;
+            const headers = { 'Content-Type': 'audio/wav', 'Content-Length': String(end - start), ETag: '"v1"',
+                ...(range ? { 'Content-Range': `bytes ${start}-${end - 1}/${data.length}` } : {}) };
+            if (range) return new Response(data.subarray(start, end), { status: 206, headers });
+            return new Response(new ReadableStream({ start(controller) {
+                controller.enqueue(data.subarray(0, 4096));
+                interrupt = () => controller.error(Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }));
+            } }), { headers });
+        });
+        const store = createPlaybackStreams({ archive, fetchFn, logInfo: vi.fn(), logWarn: vi.fn() }); stores.push(store);
+        const lease = await store.create('https://synthetic.test/reconnect.wav', 7, context);
+        const response = await fetch(lease.url), reader = response.body!.getReader();
+        const chunks = [Buffer.from((await reader.read()).value!)];
+        store.markPlayed(lease.id, 7); interrupt();
+        while (true) { const chunk = await reader.read(); if (chunk.done) break; chunks.push(Buffer.from(chunk.value)); }
+        expect(Buffer.concat(chunks)).toEqual(data);
+        store.progress(lease.id, 7, 0.8);
+        await saved(archive);
+        const index = JSON.parse(await fs.readFile(path.join(root, '.folia-index', `${archiveKey(context)}.json`), 'utf8'));
+        expect(await fs.readFile(path.join(root, index.relative))).toEqual(data);
+        expect(fetchFn).toHaveBeenCalledTimes(3);
+        expect(store.transfer(lease.id, 7).receivedBytes).toBe(data.length);
+    });
     it('is opt-in, rejects previews and snapshots metadata without URLs or credentials', async () => {
         const { archive, root } = await setup();
         archive.configure({ enabled: false });
@@ -119,19 +148,24 @@ describe('played audio archive', () => {
         await fs.writeFile(indexPath, JSON.stringify({ ...entry, relative: '../outside.wav' }));
         expect(await archive.find(context, 7)).toBeNull();
     });
-    it('captures exactly the one upstream playback transfer without delaying its first byte', async () => {
+    it('archives only the playback transfer, excluding the tiny range verification request', async () => {
         const { archive } = await setup(); const data = wav(); let finish!: () => void;
-        const fetchFn = vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+        const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+            if ((init.headers as Record<string, string>).Range === 'bytes=0-0') return new Response(data.subarray(0, 1), {
+                status: 206, headers: { 'Content-Type': 'audio/wav', 'Content-Length': '1', 'Content-Range': `bytes 0-0/${data.length}` },
+            });
+            return new Response(new ReadableStream({ start(controller) {
             controller.enqueue(data.subarray(0, 44));
             finish = () => { controller.enqueue(data.subarray(44)); controller.close(); };
-        } }), { headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(data.length) } }));
+            } }), { headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(data.length) } });
+        });
         const store = createPlaybackStreams({ archive, fetchFn, logInfo: vi.fn(), logWarn: vi.fn() }); stores.push(store);
         const lease = await store.create('https://synthetic.test/a.wav?token=must-not-be-saved', 7, context);
         const response = await fetch(lease.url), reader = response.body!.getReader();
         expect((await reader.read()).value).toEqual(new Uint8Array(data.subarray(0, 44)));
         expect(archive.settings().savedCount).toBe(0); store.markPlayed(lease.id, 7); store.progress(lease.id, 7, 0.8); finish();
         while (!(await reader.read()).done) { /* Consume the rest of the same request. */ }
-        await saved(archive); expect(fetchFn).toHaveBeenCalledTimes(1);
-        expect(await archive.find(context, 7)).not.toBeNull(); expect(fetchFn).toHaveBeenCalledTimes(1);
+        await saved(archive); expect(fetchFn).toHaveBeenCalledTimes(2);
+        expect(await archive.find(context, 7)).not.toBeNull(); expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 });

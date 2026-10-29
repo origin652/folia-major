@@ -7,6 +7,17 @@ const { createStreamHealth } = require('../../../electron/playbackBackends/strea
 const { networkFailure, retryableStatus } = require('../../../electron/hifi/networkFailure.cjs');
 
 describe('stream health', () => {
+    it('distinguishes fresh transfer failures from retained errors across readiness probes', async () => {
+        const health = createStreamHealth({ fetchFn: async () => new Response('x') });
+        health.add('id', 'https://synthetic.test/audio');
+        health.fail('id', { code: 'SOURCE_UNREACHABLE', retryable: true });
+        const first = health.read('id').failureId;
+        await health.probe('id');
+        expect(health.read('id').failureId).toBe(first);
+        health.clear('id');
+        health.fail('id', { code: 'SOURCE_UNREACHABLE', retryable: true });
+        expect(health.read('id').failureId).toBeGreaterThan(first);
+    });
     it('counts actual bytes, aggregates a bounded two-second window and decays to zero', () => {
         let now = 0;
         const health = createStreamHealth({ fetchFn: vi.fn(), now: () => now });

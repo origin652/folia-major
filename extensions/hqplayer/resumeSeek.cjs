@@ -8,6 +8,7 @@ const confirmResumeSeek = async ({ request, readStatus, stillOwns }, seconds) =>
         let status = await readStatus();
         if (!stillOwns(status)) throw new Error('HQPlayer transport changed while restoring the playback position');
         if (!['paused', 'playing'].includes(status.state)) throw new Error('HQPlayer stopped while restoring the playback position');
+        if (sent && status.state === 'paused' && Math.abs(status.position - target) <= 1) return status;
         // Wait for decoder metadata as well as PLAYING; URI acknowledgement can precede seek readiness.
         if ((target === 0 || status.duration > target) && sent < 3 && attempt % 2 === 0) {
             await request('Seek', { position: target });

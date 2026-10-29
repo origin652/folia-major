@@ -1,17 +1,17 @@
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAudioArchiveStore, isAudioArchiveSupported } from '../../../../../services/audioArchive/useAudioArchiveStore';
-import { Button, CopyValue, Group, Row, Status, Toggle, Value } from '../../kit';
-import { ARCHIVE, ARCHIVE_OPTIONS } from './options';
+import { Button, CopyValue, Row, Status, Toggle, Value } from '../../kit';
+import { ARCHIVE_OPTIONS } from './options';
 
-// Archive settings are a desktop storage concern; the native service owns the directory and settings.
+// Archive rows share the audio storage card; the native service still owns their directory and settings.
 const AudioArchiveGroup: React.FC = () => {
     const { t } = useTranslation();
     const { settings, busy, error, refresh, configure, choose } = useAudioArchiveStore();
     useEffect(() => { void refresh(); }, [refresh]);
     if (!isAudioArchiveSupported()) return null;
     return (
-        <Group def={ARCHIVE}>
+        <>
             <Row option={ARCHIVE_OPTIONS.enabled} hint={t('audioArchive.description')}>
                 <Toggle checked={settings.enabled} disabled={busy || !settings.directory} onChange={enabled => void configure({ enabled })} />
             </Row>
@@ -27,7 +27,7 @@ const AudioArchiveGroup: React.FC = () => {
                 <Button disabled={busy} onClick={() => void refresh()}>{t('audioArchive.refresh')}</Button>
             </Row>
             {error && <Row label={<Status tone="error">{t('audioArchive.failed')}</Status>} hint={error} />}
-        </Group>
+        </>
     );
 };
 

@@ -19,6 +19,21 @@ const setup = () => {
 };
 
 describe('HQPlayer connection', () => {
+    it('allows a bounded slow HTTP seek without extending ordinary command timeouts', async () => {
+        vi.useFakeTimers();
+        try {
+            const { client, socket } = setup();
+            const seeking = client.request('Seek', { position: 42 }, 1000);
+            await vi.advanceTimersByTimeAsync(500);
+            expect(client.closed).toBe(false);
+            socket.emit('data', '<Seek result="OK"/>\n');
+            await seeking;
+            const status = expect(client.request('Status')).rejects.toThrow('Status timed out');
+            await vi.advanceTimersByTimeAsync(100);
+            await status;
+            expect(socket.writes).toHaveLength(2);
+        } finally { vi.useRealTimers(); }
+    });
     it('reassembles fragments and sends only one request at a time', async () => {
         const { client, socket } = setup();
         const one = client.request('GetInfo');
@@ -68,5 +83,8 @@ describe('HQPlayer connection', () => {
         await expect(client.request('Play')).rejects.toThrow('timed out');
         expect(socket.writes).toHaveLength(1);
         expect(client.closed).toBe(true);
+        await expect(client.request('Pause')).rejects.toThrow('Play timed out');
+        expect(client.closeReason.message).toContain('Play timed out');
+        expect(socket.writes).toHaveLength(1);
     });
 });
