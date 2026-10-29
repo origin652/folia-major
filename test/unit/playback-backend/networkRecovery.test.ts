@@ -8,8 +8,12 @@ const setup = async () => {
     let failure: { code: string; retryable: boolean } | null = null;
     const probe = vi.fn(async () => { failure = null; return { ready: true, retryable: true }; });
     const cancelProbe = vi.fn(async () => {});
-    const session = { open: vi.fn(async () => {}), pause: vi.fn(async () => {}), play: vi.fn(async () => {}),
-        seek: vi.fn(async (_seconds: number) => {}), setVolume: vi.fn(async () => {}), dispose: vi.fn(async () => {}) };
+    let actualPosition = 0, openedId = '';
+    const session = { open: vi.fn(async (source: { sourceId: string }) => { openedId = source.sourceId; actualPosition = 0; }),
+        pause: vi.fn(async () => {}), play: vi.fn(async () => report({ type: 'status', status: {
+            sourceId: openedId, state: 'playing', position: actualPosition, duration: 180,
+        } })), seek: vi.fn(async (seconds: number) => { actualPosition = seconds; }),
+        setVolume: vi.fn(async () => {}), dispose: vi.fn(async () => {}) };
     const definition: PlaybackBackendDefinition = { name: 'Fake', capabilities: { seek: true, volume: true, http: true },
         create: callback => { report = callback; return session; } };
     const release = vi.fn(async () => {});
@@ -38,6 +42,44 @@ afterEach(async () => {
 const tracked = async () => { const s = await setup(); controllers.push(s); return s; };
 
 describe('HTTP backend network recovery', () => {
+    it('does not manufacture the requested position when the backend actually starts at zero', async () => {
+        const s = await tracked();
+        s.session.open.mockImplementationOnce(async source => {
+            s.session.play.mockImplementationOnce(async () => s.report({ type: 'status', status: {
+                sourceId: source.sourceId, state: 'playing', position: 0, duration: 180,
+            } }));
+        });
+        s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(1500);
+        expect(s.c.getStatus().state).not.toBe('playing');
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(s.events.at(-1)?.type).toBe('error');
+        expect(s.c.getStatus().state).toBe('paused');
+        s.session.play.mockImplementationOnce(async () => s.report({ type: 'status', status: {
+            sourceId: s.c.getStatus().sourceId, state: 'playing', position: 42, duration: 180,
+        } }));
+        await expect(s.c.play()).resolves.toBe(true);
+    });
+    it('accepts the observed resume clock, not a synthetic exact seek target', async () => {
+        const s = await tracked();
+        s.session.open.mockImplementationOnce(async source => {
+            s.session.play.mockImplementationOnce(async () => s.report({ type: 'status', status: {
+                sourceId: source.sourceId, state: 'playing', position: 42.5, duration: 180,
+            } }));
+        });
+        s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(1000);
+        expect(s.c.getStatus()).toMatchObject({ state: 'playing', position: 42.5 });
+    });
+    it('pause cancels a pending position confirmation immediately without a late restart', async () => {
+        const s = await tracked();
+        s.session.play.mockImplementationOnce(async () => {});
+        s.interrupt(); await flush(); await vi.advanceTimersByTimeAsync(1000);
+        expect(s.c.getStatus().state).toBe('loading');
+        await s.c.pause();
+        const plays = s.session.play.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(s.c.getStatus().state).toBe('paused');
+        expect(s.session.play).toHaveBeenCalledTimes(plays);
+    });
     it('waits with a frozen clock and resumes the same lease and previous position without advancing', async () => {
         const s = await tracked();
         await s.c.setVolume(0.2);

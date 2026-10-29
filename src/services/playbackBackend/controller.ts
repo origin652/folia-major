@@ -4,6 +4,7 @@ import type { PlaybackBackendDefinition, PlaybackBackendEvent, PlaybackBackendSe
 import { backendMediaShim } from '../hifi/hifiMediaShim';
 import type { ArchiveContext } from '../audioArchive/types';
 import { createNetworkRecovery } from './networkRecovery';
+import { createResumeConfirmation } from './resumeConfirmation';
 
 // Serializes transport intent around asynchronous opens; stale sessions cannot move the host clock.
 
@@ -26,6 +27,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     let status: PlaybackBackendStatus = { sourceId, state: 'stopped', position: 0, duration: 0 };
     let capturedAt = performance.now();
     let resumeStatus = status;
+    const resumeConfirmation = createResumeConfirmation();
     const recovery = createNetworkRecovery({
         canSeek: () => Boolean(definition?.capabilities.seek),
         wantsPlay: () => wantsPlay,
@@ -56,14 +58,31 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 if (definition?.capabilities.volume) await active.setVolume(volume);
                 if (!valid()) return;
                 recovery.checkRestore();
-                await active.play();
-                if (!valid()) { if (active === session && !wantsPlay) await active.pause(); return; }
-                recovery.checkRestore();
-                deliver({ type: 'status', status: { ...status, state: 'playing', position } }, generation);
+                resumeConfirmation.begin(sourceId, position);
+                try {
+                    await active.play();
+                    if (!valid()) { if (active === session && !wantsPlay) await active.pause(); return; }
+                    recovery.checkRestore();
+                    const confirmed = await resumeConfirmation.wait(valid);
+                    if (confirmed && valid()) {
+                        recovery.checkRestore();
+                        deliver({ type: 'status', status: confirmed }, generation);
+                    }
+                } catch (error) {
+                    if (valid()) {
+                        try { await active.pause(); }
+                        catch (pauseError) { console.warn('[PlaybackBackend] Could not pause after failed resume', pauseError); }
+                    }
+                    throw error;
+                } finally { resumeConfirmation.cancel(); }
             })();
             return ready;
         },
-        failed: message => deliver({ type: 'error', sourceId, message }, generation),
+        failed: message => {
+            // The failed restore was handled here; a later explicit Play must not inherit its rejected promise.
+            ready = ready.catch(() => {});
+            deliver({ type: 'error', sourceId, message }, generation);
+        },
     });
 
     const notify = (event: PlaybackBackendEvent) => listeners.forEach(listener => {
@@ -101,7 +120,12 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         if (token !== generation) return;
         if ((event.type === 'status' ? event.status?.sourceId : event.sourceId) !== sourceId) return;
         if (recovery.pending()) {
-            if (event.type === 'error') recovery.captureError(event.message);
+            if (event.type !== 'status') {
+                const message = event.type === 'error' ? event.message : 'Playback stopped before the resume position was confirmed';
+                recovery.captureError(message);
+                resumeConfirmation.fail(message);
+            }
+            if (event.type === 'status') resumeConfirmation.observe(event.status);
             return;
         }
         // An interrupted authenticated stream is not EOF, even if a backend treats early stops as ended.
@@ -125,6 +149,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         const token = ++generation;
         revision++;
         recovery.attach(null);
+        resumeConfirmation.cancel();
         wantsPlay = false;
         const previous = session;
         const previousSource = prepared;
@@ -155,6 +180,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         if (url === sourceUrl && sourceId) return ready;
         const currentRevision = ++revision;
         recovery.attach(null);
+        resumeConfirmation.cancel();
         const token = generation;
         wantsPlay = false;
         sourceUrl = url;
@@ -219,6 +245,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     const pause = async () => {
         wantsPlay = false;
         recovery.cancel();
+        resumeConfirmation.cancel();
         if (recovery.pending()) {
             status = { ...status, state: 'paused' };
             notify({ type: 'status', status });
