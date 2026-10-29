@@ -129,6 +129,108 @@ describe('backend controller', () => {
         await c.setBackend(null);
         expect(s.release).toHaveBeenCalledOnce();
     });
+    it('publishes pending backend setup before a status listener opens the next track', async () => {
+        const b = mockBackend(), s = staged();
+        const c = createBackendController(s.prepare);
+        let loading: Promise<void> | undefined;
+        const off = c.subscribe(event => {
+            if (event.type === 'status' && !event.status.sourceId && !loading) {
+                loading = c.open('https://test/next');
+                void loading.catch(() => {});
+            }
+        });
+        await c.setBackend(b.definition);
+        off();
+        await expect(loading).resolves.toBeUndefined();
+        expect(b.session.open).toHaveBeenCalledOnce();
+        await c.setBackend(null);
+    });
+    it('keeps reentrant source opens in order instead of opening a stale track last', async () => {
+        const b = mockBackend(), s = staged();
+        const c = createBackendController(s.prepare);
+        await c.setBackend(b.definition);
+        let newer: Promise<void> | undefined;
+        let requested = false;
+        const off = c.subscribe(event => {
+            if (event.type === 'status' && event.status.state === 'loading' && !requested) {
+                requested = true;
+                newer = c.open('https://test/newer');
+            }
+        });
+        const loading = c.open('https://test/first');
+        off();
+        await Promise.all([loading, newer]);
+        expect(b.session.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ url: 'https://test/newer' }));
+        await c.setBackend(null);
+    });
+    it('lets a loading observer autoplay only after the new source is opened', async () => {
+        const b = mockBackend(), order: string[] = [];
+        const c = createBackendController(staged().prepare);
+        vi.mocked(b.session.open).mockImplementation(async () => { order.push('open'); });
+        vi.mocked(b.session.play).mockImplementation(async () => { order.push('play'); });
+        await c.setBackend(b.definition);
+        let playing: Promise<boolean> | undefined;
+        const off = c.subscribe(event => {
+            if (event.type === 'status' && event.status.state === 'loading') playing = c.play();
+        });
+        await c.open('https://test/next');
+        off();
+        await playing;
+        expect(order).toEqual(['open', 'play']);
+        await c.setBackend(null);
+    });
+    it('preserves the initialization failure instead of replacing it with unavailable on open', async () => {
+        const b = mockBackend(), failure = new Error('backend initialization failed');
+        vi.spyOn(b.definition, 'create').mockImplementation(() => { throw failure; });
+        const c = createBackendController(staged().prepare);
+        await expect(c.setBackend(b.definition)).rejects.toBe(failure);
+        await expect(c.open('https://test/next')).rejects.toBe(failure);
+        await c.setBackend(null);
+    });
+    it('advances after EOF through a stopped source while disposal is still pending', async () => {
+        const b = mockBackend(), s = staged(), disposing = deferred();
+        const create = vi.spyOn(b.definition, 'create');
+        const c = createBackendController(s.prepare);
+        await c.setBackend(b.definition);
+        await c.open('https://test/first');
+        await c.play();
+        vi.mocked(b.session.dispose).mockImplementationOnce(() => disposing.promise);
+        let stopping: Promise<void> | undefined, loading: Promise<void> | undefined, playing: Promise<boolean> | undefined;
+        const off = c.subscribe(event => {
+            if (event.type === 'ended') stopping = c.stop();
+            if (event.type === 'status' && !event.status.sourceId) loading = c.open('https://test/next');
+            if (event.type === 'status' && event.status.state === 'loading') playing = c.play();
+        });
+        b.report({ type: 'ended', sourceId: c.getStatus().sourceId });
+        expect(loading).toBeDefined();
+        await Promise.resolve();
+        expect(b.session.open).toHaveBeenCalledOnce();
+        expect(create).toHaveBeenCalledOnce();
+        disposing.resolve();
+        await Promise.all([stopping, loading, playing]);
+        off();
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(b.session.open).toHaveBeenCalledTimes(2);
+        expect(b.session.play).toHaveBeenCalledTimes(2);
+        expect(s.release).toHaveBeenCalledOnce();
+        await c.setBackend(null);
+    });
+    it('does not hide or bypass failed disposal when the next song opens', async () => {
+        const b = mockBackend(), s = staged();
+        const c = createBackendController(s.prepare);
+        await c.setBackend(b.definition);
+        await c.open('https://test/first');
+        const failure = new Error('output still active');
+        vi.mocked(b.session.dispose).mockRejectedValueOnce(failure);
+        await expect(c.stop()).rejects.toBe(failure);
+        await expect(c.open('https://test/next')).rejects.toBe(failure);
+        expect(s.prepare).toHaveBeenCalledOnce();
+        expect(s.release).not.toHaveBeenCalled();
+        await c.stop();
+        await c.open('https://test/next');
+        expect(b.session.open).toHaveBeenCalledTimes(2);
+        await c.setBackend(null);
+    });
     it('pause cancels play intent while open is pending', async () => {
         const b = mockBackend();
         const gate = deferred();

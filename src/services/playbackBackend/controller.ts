@@ -23,6 +23,7 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
     let sourceId = '';
     let sourceUrl = '';
     let ready: Promise<void> = Promise.resolve();
+    let backendReady = ready;
     let retired: { session: PlaybackBackendSession; source: PreparedSource | null } | null = null;
     let status: PlaybackBackendStatus = { sourceId, state: 'stopped', position: 0, duration: 0 };
     let capturedAt = performance.now();
@@ -161,9 +162,8 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         sourceUrl = '';
         status = { sourceId: '', state: 'stopped', position: 0, duration: 0 };
         resumeStatus = status;
-        notify({ type: 'status', status });
         const previousReady = ready;
-        ready = (async () => {
+        const changing = (async () => {
             await previousReady.catch(() => {});
             if (retired) {
                 const retiring = retired;
@@ -171,9 +171,15 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
                 await release(retiring.source);
                 if (retired === retiring) retired = null;
             }
-            if (token === generation && next) session = next.create(event => report(event, token));
+            if (token === generation) {
+                if (next) session = next.create(event => report(event, token));
+                console.info('[PlaybackBackend] Backend session changed', { generation: token, backend: next?.name ?? null });
+            }
         })();
-        await ready;
+        // Observers may synchronously open/play from this notification; publish their barrier first.
+        backendReady = ready = changing;
+        notify({ type: 'status', status });
+        await changing;
     };
 
     const open = (url: string, context?: ArchiveContext) => {
@@ -189,12 +195,18 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
         status = { sourceId: id, state: 'loading', position: 0, duration: 0 };
         resumeStatus = status;
         capturedAt = performance.now();
-        notify({ type: 'status', status });
         const previousReady = ready;
-        ready = (async () => {
+        const selectedReady = backendReady;
+        const loading = (async () => {
             await previousReady.catch(() => {});
             if (token !== generation || currentRevision !== revision) return;
-            if (!session || !definition) throw new Error('playback-backend-unavailable');
+            await selectedReady;
+            if (token !== generation || currentRevision !== revision) return;
+            if (!session || !definition) {
+                console.warn('[PlaybackBackend] Source open has no backend session', { generation: token, revision: currentRevision,
+                    backend: definition?.name ?? null, retired: Boolean(retired) });
+                throw new Error('playback-backend-unavailable');
+            }
             const active = session;
             await active.pause();
             const next = context ? await prepare(url, id, definition.capabilities.http, context)
@@ -221,7 +233,9 @@ export const createBackendController = (prepare: PrepareSource = prepareBackendS
             }
             throw error;
         });
-        return ready;
+        ready = loading;
+        notify({ type: 'status', status });
+        return loading;
     };
 
     const play = async () => {
@@ -309,7 +323,9 @@ backendPlayback.subscribe(event => {
 });
 export const usesPlaybackBackend = () => selectedPlaybackBackend() !== null;
 subscribePlaybackBackends(() => {
-    void backendPlayback.setBackend(getPlaybackBackend()?.definition ?? null).catch(error => {
+    const entry = getPlaybackBackend();
+    if (!entry && selectedPlaybackBackend()) console.warn('[PlaybackBackend] Selected backend registration is unavailable', { id: selectedPlaybackBackend() });
+    void backendPlayback.setBackend(entry?.definition ?? null).catch(error => {
         console.error('[PlaybackBackend] Backend change failed', error);
     });
 });

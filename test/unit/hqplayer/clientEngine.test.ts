@@ -9,7 +9,7 @@ const { createHqpEngine } = require('../../../extensions/hqplayer/engine.cjs');
 const { commandXml, parseResponse } = require('../../../extensions/hqplayer/protocol.cjs');
 
 describe('HQPlayer host/client/engine integration', () => {
-    it('keeps control across five asynchronous stops, pauses and automatic EOF queue advances', async () => {
+    it.each([false, true])('keeps control across five EOF advances with a transient empty source: %s', async resetBetweenTracks => {
         vi.useFakeTimers();
         const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const state = { state: 0, position: 0, length: 10, volume: -20, tracks_total: 0, track_id: '', repeat: 0, random: 0 };
@@ -50,7 +50,11 @@ describe('HQPlayer host/client/engine integration', () => {
         let advancing: Promise<unknown> = Promise.resolve();
         controller.subscribe(event => {
             events.push(event);
-            if (event.type === 'ended') advancing = controller.open(`https://test/track-${events.length}`).then(() => controller.play());
+            if (event.type === 'ended') {
+                const stopping = resetBetweenTracks ? controller.stop() : Promise.resolve();
+                const opening = controller.open(`https://test/track-${events.length}`);
+                advancing = Promise.all([stopping, opening]).then(() => controller.play());
+            }
         });
         const settle = async (promise: Promise<unknown>) => {
             await vi.advanceTimersByTimeAsync(1600);
@@ -74,7 +78,7 @@ describe('HQPlayer host/client/engine integration', () => {
             }
             expect(events.filter(event => event.type === 'ended')).toHaveLength(5);
             expect(events.filter(event => event.type === 'error')).toEqual([]);
-            expect(connection.request.mock.calls.filter(([name]) => name === 'GetInfo')).toHaveLength(1);
+            expect(connection.request.mock.calls.filter(([name]) => name === 'GetInfo')).toHaveLength(resetBetweenTracks ? 6 : 1);
             expect(connection.request.mock.calls.filter(([name]) => name === 'PlayNextURI')).toHaveLength(6);
             expect(warning).toHaveBeenCalledExactlyOnceWith('[HQPlayer] Early stop treated as track end by temporary policy',
                 expect.objectContaining({ lastPosition: 2, lastDuration: 10 }));
