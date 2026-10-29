@@ -5,6 +5,7 @@ const { stageHqpSource } = require('./mediaSource.cjs');
 const { normalizeConfig, decodeStatus, decodeVolumeRange, volumeTarget } = require('./protocol.cjs');
 const { ensureHqplayer } = require('./launcher.cjs');
 const { readDsp, planDsp, applyDsp } = require('./dsp.cjs');
+const { confirmResumeSeek } = require('./resumeSeek.cjs');
 
 // Owns one local HQPlayer URI transport, not the process, license, filters or device configuration.
 
@@ -323,18 +324,31 @@ const createHqpEngine = (report, cache, { connect = config => new HqConnection(c
             }
             retireEmptyTransport(before);
             await applyVolume();
-            if (loaded) await request('Play', { last: 0 });
-            else {
+            const wasLoaded = loaded;
+            if (!loaded) {
                 // Match the working official --play-next-uri path; PlaylistAdd can terminate HQPlayer 6 here.
                 await request('PlayNextURI', { value: media.uri, freewheel: 0 });
                 loaded = true;
                 await waitForLoaded();
                 await releaseRetired();
-                if (pendingSeek !== null) {
-                    await request('Seek', { position: pendingSeek });
-                    pendingSeek = null;
-                }
             }
+            if (pendingSeek !== null) {
+                // Hold the newly started URI while its decoder catches up. Never knowingly continue at zero.
+                await pauseOutput();
+                let confirmed;
+                try { confirmed = await confirmResumeSeek({ request, readStatus, stillOwns }, pendingSeek); }
+                catch (error) {
+                    try {
+                        const actual = await readStatus();
+                        if (stillOwns(actual)) await pauseOutput();
+                        else owned = false;
+                    } catch (pauseError) { console.warn('[HQPlayer] Could not confirm paused output after failed resume', pauseError); }
+                    throw error;
+                }
+                pendingSeek = null;
+                previous = confirmed;
+                await request('Play', { last: 0 });
+            } else if (wasLoaded) await request('Play', { last: 0 });
             playing = true;
             await poll();
             schedule();

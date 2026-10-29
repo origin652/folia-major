@@ -2,7 +2,7 @@
     "folium": 1,
     "id": "hqplayer",
     "name": "HQPlayer Output / HQPlayer 播放输出",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": "Independent local HQPlayer Desktop playback backend. HQPlayer performs decoding, DSP and device output; requires the experimental playback.backends host API.",
     "main": "index.cjs",
     "client": "client.mjs",

@@ -139,6 +139,48 @@ describe('HQPlayer engine', () => {
         const names = connection.request.mock.calls.map(([name]) => name);
         expect(names.indexOf('Seek')).toBeGreaterThan(names.indexOf('PlayNextURI'));
     });
+    it('confirms a deferred resume against the native clock, retrying an acknowledged but ignored seek while paused', async () => {
+        vi.useFakeTimers();
+        const { engine, connection, state } = setup({ length: 180 });
+        const request = connection.request.getMockImplementation()!;
+        let seeks = 0;
+        connection.request.mockImplementation(async (name, attrs) => {
+            if (name === 'Seek' && (++seeks === 1 || state.state !== 1)) return parseResponse('<Seek result="OK"/>', name);
+            return request(name, attrs);
+        });
+        await engine.open(source); await engine.seek(42);
+        const playing = engine.play();
+        await vi.advanceTimersByTimeAsync(2500); await playing;
+        expect(state.position).toBe(42);
+        expect(state.state).toBe(2);
+        expect(seeks).toBe(2);
+        const names = connection.request.mock.calls.map(([name]) => name);
+        expect(names.indexOf('Pause')).toBeLessThan(names.indexOf('Seek'));
+    });
+    it('waits for URI duration before seeking and leaves an unseekable stream paused rather than restarting at zero', async () => {
+        vi.useFakeTimers();
+        const s = setup({ length: 180 });
+        const request = s.connection.request.getMockImplementation()!;
+        let metadataPending = 0, acceptSeek = false;
+        s.connection.request.mockImplementation(async (name, attrs) => {
+            if (name === 'PlayNextURI') { await request(name, attrs); s.state.length = 0; metadataPending = 5; }
+            if (name === 'Status' && metadataPending > 0 && --metadataPending === 0) s.state.length = 180;
+            if (name === 'Seek') {
+                expect(s.state.length).toBe(180);
+                if (!acceptSeek) return parseResponse('<Seek result="OK"/>', name);
+            }
+            return request(name, attrs);
+        });
+        await s.engine.open(source); await s.engine.seek(42);
+        const failed = expect(s.engine.play()).rejects.toThrow('did not confirm the resume position');
+        await vi.advanceTimersByTimeAsync(9000); await failed;
+        expect(s.state.state).toBe(1); expect(s.state.position).toBe(0);
+        expect(s.connection.request.mock.calls.filter(([name]) => name === 'Play')).toHaveLength(0);
+        expect(s.connection.request.mock.calls.filter(([name]) => name === 'Seek')).toHaveLength(3);
+        acceptSeek = true;
+        await s.engine.play();
+        expect(s.state.position).toBe(42); expect(s.state.state).toBe(2);
+    });
     it('waits for the URI track count to settle instead of mistaking loading for a foreign controller', async () => {
         vi.useFakeTimers();
         const { engine, connection, state, report } = setup();
@@ -388,7 +430,7 @@ describe('HQPlayer engine', () => {
         s.state.length = 10;
         await s.engine.play();
         expect(s.connection.request.mock.calls.filter(([name]) => name === 'PlayNextURI')).toHaveLength(2);
-        expect(s.connection.request.mock.calls.filter(([name]) => name === 'Play')).toHaveLength(0);
+        expect(s.connection.request.mock.calls.filter(([name]) => name === 'Play')).toHaveLength(1);
         expect(s.state.position).toBe(2);
         expect(s.state.state).toBe(2);
     });

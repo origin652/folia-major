@@ -25,6 +25,7 @@ const run = async () => {
     let serial = 0;
     let streamedUri = null;
     let stopping = 0, pausing = 0;
+    let resumeSeeksToIgnore = 0, requirePausedSeek = false;
     const dsp = { mode: 0, filter: 0, filter1x: 0, filterNx: 0, shaper: 0, rate: 0 };
     const lists = {
         GetModes: '<ModesItem index="0" name="PCM" value="0"/>',
@@ -67,7 +68,10 @@ const run = async () => {
                 if (name === 'Pause') pausing = 2;
                 if (name === 'Stop') { state = 3; tracks = 0; position = 0; stopping = 2; }
                 if (name === 'Volume') volume = Number(request.getAttribute('value'));
-                if (name === 'Seek') position = Number(request.getAttribute('position'));
+                if (name === 'Seek') {
+                    if (resumeSeeksToIgnore > 0) resumeSeeksToIgnore--;
+                    else if (!requirePausedSeek || state === 1) position = Number(request.getAttribute('position'));
+                }
                 if (name === 'State') attrs = dsp;
                 if (name === 'SetFilter') { dsp.filterNx = Number(request.getAttribute('value')); dsp.filter1x = Number(request.getAttribute('value1x')); }
                 if (name === 'SetShaping') dsp.shaper = Number(request.getAttribute('value'));
@@ -183,6 +187,13 @@ const run = async () => {
         await session.seek(4);
         await session.play();
         assert.equal(position, 4);
+        await session.open({ sourceId: 'stream-resume', url: hostUri });
+        await session.seek(4);
+        resumeSeeksToIgnore = 1; requirePausedSeek = true;
+        await session.play();
+        assert.equal(position, 4, 'Native resume must be confirmed, not just the Seek OK response');
+        assert.equal(state, 2);
+        requirePausedSeek = false;
         await session.open({ sourceId: 'mute-check', filePath: file });
         await session.play();
         await session.setVolume(0);
